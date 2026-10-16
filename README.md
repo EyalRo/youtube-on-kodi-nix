@@ -56,7 +56,7 @@ systemd.services.kodi.serviceConfig.Environment =
   [ "PATH=${lib.makeBinPath [ pkgs.ffmpeg pkgs.deno pkgs.coreutils ]}" ];
 ```
 
-`port` and `masterDir` are arguments of `package.nix` (defaults `8099` and
+`port`, `maxHeight` and `masterDir` are arguments of `package.nix` (defaults `8099` and
 `/run/youtube-on-kodi`). If you change them, change the module's `port` and
 `runtimeDirectory` to match.
 
@@ -67,7 +67,7 @@ add-on menu.
 
 - Upstream is a young single-maintainer project, pinned here to commit
   `954b94f` (v1.6.5). Keep yt-dlp current; YouTube breaks it regularly.
-- Playback is capped at 720p.
+- Playback picks the highest resolution up to `maxHeight` (default 2160, a `package.nix` argument), preferring H.264. Above 1080p YouTube only offers VP9/AV1 at high bitrates (about 28 Mbps for 4K60), so use a lower `maxHeight` if your hardware or network struggles. There is no adaptive switching.
 - There are no real subscriptions, only a local channel list.
 - Choosing Cancel in the Play/Download menu may show a harmless "playback
   failed" popup.

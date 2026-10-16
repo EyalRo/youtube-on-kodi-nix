@@ -3,6 +3,7 @@
 , fetchFromGitHub
 , yt-dlp
 , port ? 8099
+, maxHeight ? 2160
 , masterDir ? "/run/youtube-on-kodi"
 }:
 
@@ -35,6 +36,7 @@ buildKodiAddon {
     cat ${./hls-patch.py} >> resources/lib/kanyt.py
     substituteInPlace resources/lib/kanyt.py \
       --replace-fail '@masterDir@' '${masterDir}' \
-      --replace-fail '@port@' '${toString port}'
+      --replace-fail '@port@' '${toString port}' \
+      --replace-fail '@maxHeight@' '${toString maxHeight}'
   '';
 }

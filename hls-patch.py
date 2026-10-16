@@ -12,13 +12,14 @@ _get_stream_url_muxed = get_stream_url
 _MASTER_DIR = "@masterDir@"
 
 
-def get_stream_url(video_id, max_height=720):
+def get_stream_url(video_id, max_height=@maxHeight@):
     url = WATCH_URL.format(video_id)
     hls = "[protocol^=m3u8]"
-    fmt = (
-        "bv*[height<=?{h}]{p}[vcodec^=avc1]/bv*[height<=?{h}]{p},ba{p}"
-    ).format(h=max_height, p=hls)
-    p = _run_ytdlp(["-f", fmt, "--get-url", "--no-warnings", url])
+    # Highest resolution up to max_height, preferring H.264 (hardware decode)
+    # among equals. Above 1080p YouTube only offers VP9/AV1.
+    fmt = "bv*{p},ba{p}".format(p=hls)
+    sort = "res:{},vcodec:avc1".format(max_height)
+    p = _run_ytdlp(["-S", sort, "-f", fmt, "--get-url", "--no-warnings", url])
     lines = [l for l in p.stdout.strip().splitlines() if l.strip()]
     if p.returncode != 0 or len(lines) < 2 or not os.access(_MASTER_DIR, os.W_OK):
         return _get_stream_url_muxed(video_id, max_height)
