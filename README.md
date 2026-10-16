@@ -28,7 +28,7 @@ insertion isn't in the path. That is an observation, not a guarantee.
 
 ```nix
 # flake.nix inputs
-youtube-on-kodi.url = "github:OWNER/youtube-on-kodi-nix";
+youtube-on-kodi.url = "github:EyalRo/youtube-on-kodi-nix";
 ```
 
 ```nix
