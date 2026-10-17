@@ -1,7 +1,9 @@
 # youtube-on-kodi-nix
 
 Notes and research for the NixOS packaging and the maintained fork of the
-Youtube-On-Kodi add-on. Source of truth for the code is the repository; these
+Youtube-On-Kodi add-on. These pages are kept in the repository under `docs/wiki/` (the GitHub wiki
+could not be pushed to yet) and are written so they can be copied into it
+unchanged. Source of truth for the code is the repository; these
 pages record *why* things are the way they are.
 
 | Page | Status |

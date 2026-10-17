@@ -89,7 +89,7 @@ add-on menu.
   resume over JSON-RPC. No network, GPU or human needed (about 2 minutes).
   `YOK_KEEP=1` keeps the temporary Kodi home and `kodi.log` for debugging.
 
-CI runs both. See the [wiki](../../wiki) for the research notes. A skin
+CI runs both. Research notes and design docs are in [`docs/wiki/`](docs/wiki/Home.md). A skin
 integrated with the add-on is planned but not started.
 
 ## License
