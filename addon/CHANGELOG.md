@@ -10,6 +10,8 @@
 - History entries play directly (auto-resume); "Remove from history" is in the context menu.
 
 ### Fixed
+- Seeking no longer breaks the video: plays through inputstream.adaptive (setting: Playback engine) because Kodi's bundled ffmpeg cannot seek in fragmented-MP4 HLS.
+- Resume now seeks to the saved position after playback starts; a failed resume used to overwrite the saved position.
 - Playback resolves the plugin item instead of calling Player.play(), removing the false "playback failed" popup.
 - Streams resolve again on current YouTube by pairing HLS video and audio streams.
 

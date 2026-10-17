@@ -2,6 +2,7 @@
 { lib
 , buildKodiAddon
 , yt-dlp
+, inputstream-adaptive
 , port ? 8099
 , maxHeight ? 2160
 , masterDir ? "/run/youtube-on-kodi"
@@ -15,6 +16,10 @@ buildKodiAddon {
   version = "1.7.0";
 
   src = ./addon;
+
+  # Seeking in fragmented-MP4 HLS needs inputstream.adaptive; Kodi's bundled
+  # ffmpeg breaks the video after a seek.
+  propagatedBuildInputs = [ inputstream-adaptive ];
 
   # Build-time configuration; see the placeholders in resources/lib/kanyt.py.
   postPatch = ''

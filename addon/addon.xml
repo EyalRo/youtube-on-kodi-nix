@@ -2,6 +2,7 @@
 <addon id="plugin.video.myyoutubers" name="Youtube On Kodi" version="1.7.0" provider-name="local">
     <requires>
         <import addon="xbmc.python" version="3.0.0"/>
+        <import addon="inputstream.adaptive" optional="true"/>
     </requires>
     <extension point="xbmc.python.pluginsource" library="default.py">
         <provides>video</provides>
@@ -15,7 +16,7 @@
             <icon>resources/icon.png</icon>
         </assets>
         <news>
-1.7.0 - Working playback on current YouTube (paired HLS video/audio streams), selecting a video now plays it (Download, Add to playlist and Play from start moved to the context menu), history entries play directly, configurable maximum quality, no more "playback failed" popups.
+1.7.0 - Seeking works in all videos (plays through inputstream.adaptive), resume seeks to the saved position, working playback on current YouTube (paired HLS video/audio streams), selecting a video now plays it (Download, Add to playlist and Play from start moved to the context menu), history entries play directly, configurable maximum quality, no more "playback failed" popups.
 1.6.5 - Automatic cache cleanup (orphaned channel caches, age/count limits on search caches), configurable cache duration and retry cooldown, channel metadata expiry, atomic cache writes, cached popular and video info.
 1.6.0 - Enhanced history: resume indicators in video lists, rich history with thumbnails and progress, delete individual history entries, better auto‑resume.
 1.5.3 - Added manual refresh options: refresh all caches or refresh a single channel; automatic cache expiry after 24 hours.

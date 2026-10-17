@@ -23,6 +23,8 @@ class _ListItem:
     def setArt(self, *a): pass
     def setProperty(self, k, v): self.props[k] = v
     def addContextMenuItems(self, items): self.menu = items
+    def setMimeType(self, *a): pass
+    def setContentLookup(self, *a): pass
 
 
 def _stub_kodi(profile):

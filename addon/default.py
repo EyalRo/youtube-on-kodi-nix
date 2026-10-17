@@ -516,6 +516,12 @@ def do_popular():
 
 # --- Playback and history tracking ---
 
+def _use_isa():
+    if ADDON.getSetting("playback_engine") == "ffmpeg":
+        return False
+    return xbmc.getCondVisibility("System.AddonIsEnabled(inputstream.adaptive)")
+
+
 def play_video(video_id, title="", auto_resume=False, fresh=False):
     hist = load_history()
     entry = None if fresh else hist.get(video_id)
@@ -545,16 +551,42 @@ def play_video(video_id, title="", auto_resume=False, fresh=False):
         return
     li = xbmcgui.ListItem(path=stream_url)
     li.setProperty("IsPlayable", "true")
-    if resume_at:
-        li.setProperty("StartOffset", str(resume_at))
+    if _use_isa():
+        # Kodi's bundled ffmpeg cannot seek in fragmented-MP4 HLS (the video
+        # breaks after any seek); inputstream.adaptive has its own HLS engine.
+        li.setProperty("inputstream", "inputstream.adaptive")
+        li.setProperty("inputstream.adaptive.manifest_type", "hls")
+        li.setMimeType("application/vnd.apple.mpegurl")
+        li.setContentLookup(False)
     xbmcplugin.setResolvedUrl(HANDLE, True, li)
     threading.Thread(
         target=_track_playback, args=(video_id, title, resume_at), daemon=True
     ).start()
 
 
+def _seek_when_playing(player, position, timeout=60):
+    """Seek once playback has started; return False if it never did.
+
+    Kodi ignores the StartOffset property on items resolved by a plugin, so
+    the resume position has to be applied with a seek after playback begins.
+    """
+    monitor = xbmc.Monitor()
+    deadline = time.time() + timeout
+    while time.time() < deadline and not monitor.abortRequested():
+        try:
+            if player.isPlaying() and player.getTime() >= 0 and player.getTotalTime() > 0:
+                player.seekTime(position)
+                return True
+        except Exception:
+            pass
+        monitor.waitForAbort(0.25)
+    return False
+
+
 def _track_playback(video_id, title, start_pos):
     player = xbmc.Player()
+    if start_pos and not _seek_when_playing(player, start_pos):
+        return
     deadline = time.time() + 6 * 60 * 60
     last_save = 0
     while time.time() < deadline:

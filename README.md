@@ -19,7 +19,12 @@ The add-on source lives in [`addon/`](addon), forked from upstream commit
    directly). Download, Add to playlist, Play from start and Remove from
    playlist are in the context menu, so every list works with Kodi's normal
    navigation and any skin.
-4. **Quality setting.** Maximum quality (360p to 2160p) is an add-on setting;
+4. **Seeking works.** Kodi's bundled ffmpeg (6.1) cannot seek in
+   fragmented-MP4 HLS: after any seek the video breaks. The add-on plays
+   through `inputstream.adaptive` instead (pulled in by the package; a setting
+   switches back to ffmpeg), and resuming a video seeks to the saved position
+   once playback starts (Kodi ignores `StartOffset` on plugin items).
+5. **Quality setting.** Maximum quality (360p to 2160p) is an add-on setting;
    `maxHeight` in `package.nix` is only its default. Downloads honour it too.
 
 Kodi treats a local `.m3u8` file as a playlist rather than a stream, so the
@@ -76,9 +81,16 @@ add-on menu.
 
 ## Development
 
-`python3 -m unittest discover -s tests` runs smoke tests against the add-on
-with Kodi's Python modules stubbed. A skin integrated with the add-on is
-planned but not started.
+- `python3 -m unittest discover -s tests`: fast smoke tests with Kodi's
+  Python modules stubbed.
+- `nix run .#e2e`: end-to-end tests. Starts a real Kodi under Xvfb with
+  software GL, installs the Nix-built add-on with a fake `yt-dlp`, serves
+  generated HLS fixtures (MPEG-TS and fMP4) and drives playback, seeking and
+  resume over JSON-RPC. No network, GPU or human needed (about 2 minutes).
+  `YOK_KEEP=1` keeps the temporary Kodi home and `kodi.log` for debugging.
+
+CI runs both. See the [wiki](../../wiki) for the research notes. A skin
+integrated with the add-on is planned but not started.
 
 ## License
 
