@@ -1,22 +1,26 @@
 # youtube-on-kodi-nix
 
-A Nix package and NixOS module for [XPDevs/Youtube-On-Kodi](https://github.com/XPDevs/Youtube-On-Kodi),
-a Kodi add-on that browses and plays YouTube channels with yt-dlp: no Google
-API key and no login.
+A Nix package and NixOS module for a maintained fork of
+[XPDevs/Youtube-On-Kodi](https://github.com/XPDevs/Youtube-On-Kodi), a Kodi
+add-on that browses and plays YouTube channels with yt-dlp: no Google API key
+and no login.
 
-The upstream add-on doesn't work as shipped on current YouTube and NixOS. This
-repo packages it with three fixes:
+The add-on source lives in [`addon/`](addon), forked from upstream commit
+`954b94f` (v1.6.5). Compared with upstream:
 
-1. **yt-dlp path.** The add-on runs `python <yt-dlp>`, but nixpkgs' `yt-dlp` is
-   a bash wrapper. The package execs the wrapper directly.
-2. **"Could not resolve stream".** YouTube no longer offers any muxed
-   audio+video format, and the add-on only asks for one. The patch requests an
-   HLS video-only and audio-only pair and writes a small master playlist that
-   Kodi plays as one stream. It falls back to the original lookup if HLS isn't
-   available.
-3. **"Playback failed" popup over a working video.** The add-on called
-   `Player.play()` without resolving the plugin item, so Kodi reported failure
-   and stopped playback. The patch uses `setResolvedUrl` instead.
+1. **Plays on current YouTube and NixOS.** The add-on execs nixpkgs' `yt-dlp`
+   wrapper directly, and since YouTube no longer offers any muxed audio+video
+   format it requests an HLS video-only and audio-only pair and writes a small
+   master playlist that Kodi plays as one stream (falling back to a muxed
+   lookup if HLS isn't available).
+2. **No "Playback failed" popup.** Playback goes through `setResolvedUrl`
+   instead of `Player.play()`.
+3. **Select plays.** Selecting a video plays it (history entries resume
+   directly). Download, Add to playlist, Play from start and Remove from
+   playlist are in the context menu, so every list works with Kodi's normal
+   navigation and any skin.
+4. **Quality setting.** Maximum quality (360p to 2160p) is an add-on setting;
+   `maxHeight` in `package.nix` is only its default. Downloads honour it too.
 
 Kodi treats a local `.m3u8` file as a playlist rather than a stream, so the
 master playlists are served over loopback HTTP by a tiny systemd unit.
@@ -56,7 +60,7 @@ systemd.services.kodi.serviceConfig.Environment =
   [ "PATH=${lib.makeBinPath [ pkgs.ffmpeg pkgs.deno pkgs.coreutils ]}" ];
 ```
 
-`port`, `maxHeight` and `masterDir` are arguments of `package.nix` (defaults `8099` and
+`port`, `maxHeight` (360, 480, 720, 1080, 1440 or 2160) and `masterDir` are arguments of `package.nix` (defaults `8099` and
 `/run/youtube-on-kodi`). If you change them, change the module's `port` and
 `runtimeDirectory` to match.
 
@@ -65,15 +69,17 @@ add-on menu.
 
 ## Limitations
 
-- Upstream is a young single-maintainer project, pinned here to commit
-  `954b94f` (v1.6.5). Keep yt-dlp current; YouTube breaks it regularly.
-- Playback picks the highest resolution up to `maxHeight` (default 2160, a `package.nix` argument), preferring H.264. Above 1080p YouTube only offers VP9/AV1 at high bitrates (about 28 Mbps for 4K60), so use a lower `maxHeight` if your hardware or network struggles. There is no adaptive switching.
+- Keep yt-dlp current; YouTube breaks it regularly.
+- Playback picks the highest resolution up to the quality setting (default 2160), preferring H.264. Above 1080p YouTube only offers VP9/AV1 at high bitrates (about 28 Mbps for 4K60), so use a lower `maxHeight` if your hardware or network struggles. There is no adaptive switching.
 - There are no real subscriptions, only a local channel list.
-- Choosing Cancel in the Play/Download menu may show a harmless "playback
-  failed" popup.
 - Tested on Kodi 21 (Omega) with `kodi-gbm` on NixOS 25.11, x86_64.
+
+## Development
+
+`python3 -m unittest discover -s tests` runs smoke tests against the add-on
+with Kodi's Python modules stubbed. A skin integrated with the add-on is
+planned but not started.
 
 ## License
 
-GPL-2.0-or-later, matching upstream. The patches here are derivative of the
-add-on's code.
+GPL-2.0-or-later, matching upstream. The add-on in `addon/` is derived from upstream.
