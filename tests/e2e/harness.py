@@ -34,6 +34,10 @@ MEDIA_PORT = 18098
 RPC_PORT = 18080
 
 
+class KodiDied(RuntimeError):
+    """Kodi exited while the harness was waiting for it (a crash, usually)."""
+
+
 def free_display():
     for n in range(90, 200):
         if not os.path.exists("/tmp/.X11-unix/X%d" % n) and not os.path.exists("/tmp/.X%d-lock" % n):
@@ -145,7 +149,7 @@ class Kodi:
             stdout=open(os.path.join(self.dir, "kodi.out"), "a"), stderr=subprocess.STDOUT,  # noqa: SIM115
             start_new_session=True)  # own process group: the wrapper script's child must die too
         self.procs.append(self.kodi_proc)
-        self._wait(self._rpc_up, 90, "Kodi JSON-RPC")
+        self._wait(self._rpc_ready, 90, "Kodi JSON-RPC")
         self.rpc("Addons.SetAddonEnabled", addonid=ADDON_ID, enabled=True)
         self.rpc("Addons.SetAddonEnabled", addonid="inputstream.adaptive", enabled=True)
         if self.skin:  # not a system add-on, so disabled until enabled
@@ -175,6 +179,19 @@ class Kodi:
     def restart_kodi(self):
         """Quit Kodi (flushing its databases) and start it again, same profile."""
         self._quit_kodi()
+        self._launch_kodi()
+
+    def alive(self):
+        """True if Kodi still answers JSON-RPC (a crashed Kodi does not)."""
+        return self.kodi_proc.poll() is None and self._rpc_up()
+
+    def crash_logs(self):
+        return sorted(glob.glob(os.path.join(self.home, "kodi_crashlog*")))
+
+    def relaunch_after_crash(self):
+        """Start Kodi again after it died (the dead process is dropped first)."""
+        self.procs.remove(self.kodi_proc)
+        self.kodi_proc.wait()
         self._launch_kodi()
 
     def video_db(self):
@@ -251,6 +268,14 @@ class Kodi:
         if "error" in r:
             raise RuntimeError("%s: %s" % (method, r["error"]))
         return r["result"]
+
+    def _rpc_ready(self):
+        """JSON-RPC is answering; raise at once if Kodi died instead of waiting it out."""
+        code = self.kodi_proc.poll()
+        if code is not None:
+            raise KodiDied("Kodi exited with status %s during startup; crash logs: %s"
+                           % (code, self.crash_logs()))
+        return self._rpc_up()
 
     def _rpc_up(self):
         try:

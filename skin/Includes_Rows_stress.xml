@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<includes>
+	<!-- Rows from the Youtube On Kodi add-on (plugin directories, see rows.py). -->
+	<include name="YokRowsWidgets">
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=everything"/>
+			<param name="widget_header" value="Everything"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8100"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=movies"/>
+			<param name="widget_header" value="Movies"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8200"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=tvshows"/>
+			<param name="widget_header" value="TV shows"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8300"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=channels"/>
+			<param name="widget_header" value="YouTube channels"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8400"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=unwatched"/>
+			<param name="widget_header" value="Shows with unwatched episodes"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8500"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=games"/>
+			<param name="widget_header" value="Games"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8600"/>
+		</include>
+		<!-- STRESS VARIANT (experiment only): one widget per system, 15 in total. -->
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=games:nes"/>
+			<param name="widget_header" value="NES"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8700"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=games:snes"/>
+			<param name="widget_header" value="SNES"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8800"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=games:genesis"/>
+			<param name="widget_header" value="Genesis"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8900"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=games:sms"/>
+			<param name="widget_header" value="Master System"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="9000"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=games:gamegear"/>
+			<param name="widget_header" value="Game Gear"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="9100"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=games:gb"/>
+			<param name="widget_header" value="Game Boy"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="9200"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=games:gbc"/>
+			<param name="widget_header" value="Game Boy Color"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="9300"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=games:gba"/>
+			<param name="widget_header" value="Game Boy Advance"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="9400"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=games:n64"/>
+			<param name="widget_header" value="Nintendo 64"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="9500"/>
+		</include>
+	</include>
+</includes>
