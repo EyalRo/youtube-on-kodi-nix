@@ -3,7 +3,15 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-  outputs = { self, nixpkgs }:
+  # Only for the Python crash experiment (e2e-stress-py314/py315): a recent
+  # unstable channel tarball, which has Python 3.15.0 (this pin predates it).
+  # A tarball from releases.nixos.org, not GitHub. Nothing else uses it.
+  inputs.nixpkgs-unstable = {
+    url = "https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1093421.f20cd90e28fe/nixexprs.tar.xz";
+    flake = false;
+  };
+
+  outputs = { self, nixpkgs, nixpkgs-unstable }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAll = f: nixpkgs.lib.genAttrs systems (s: f nixpkgs.legacyPackages.${s});
@@ -72,6 +80,17 @@
       e2eStress312 = pkgs: e2eFor pkgs {
         name = "yok-e2e-stress-py312"; kodi = kodiPy312 pkgs; stress = true; defaultTests = "test_stress";
       };
+
+      # Newer Pythons come from the unstable nixpkgs: its stock Kodi is built
+      # against 3.14, and 3.15 is Kodi rebuilt with python315 (final 3.15.0).
+      unstable = pkgs: import nixpkgs-unstable { system = pkgs.stdenv.hostPlatform.system; };
+      e2eStress314 = pkgs: let u = unstable pkgs; in e2eFor u {
+        name = "yok-e2e-stress-py314"; stress = true; defaultTests = "test_stress";
+      };
+      e2eStress315 = pkgs: let u = unstable pkgs; in e2eFor u {
+        name = "yok-e2e-stress-py315"; stress = true; defaultTests = "test_stress";
+        kodi = u.kodi.override { python3Packages = u.python315Packages; };
+      };
     in
     {
       packages = forAll (pkgs: {
@@ -79,6 +98,8 @@
         e2e = e2e pkgs;
         e2e-stress = e2eStress pkgs;
         e2e-stress-py312 = e2eStress312 pkgs;
+        e2e-stress-py314 = e2eStress314 pkgs;
+        e2e-stress-py315 = e2eStress315 pkgs;
         skin = skin pkgs;
       });
 
@@ -87,6 +108,8 @@
         e2e = { type = "app"; program = "${e2e pkgs}/bin/yok-e2e"; };
         e2e-stress = { type = "app"; program = "${e2eStress pkgs}/bin/yok-e2e-stress"; };
         e2e-stress-py312 = { type = "app"; program = "${e2eStress312 pkgs}/bin/yok-e2e-stress-py312"; };
+        e2e-stress-py314 = { type = "app"; program = "${e2eStress314 pkgs}/bin/yok-e2e-stress-py314"; };
+        e2e-stress-py315 = { type = "app"; program = "${e2eStress315 pkgs}/bin/yok-e2e-stress-py315"; };
       });
 
       # Build the add-on for a specific Kodi variant (kodi-gbm, kodi-wayland, ...):
