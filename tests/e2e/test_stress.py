@@ -24,6 +24,16 @@ workdir = None
 
 
 def setUpModule():
+    if not os.environ.get("YOK_STRESS"):  # only meaningful with the 15-widget skin
+        raise unittest.SkipTest("run via nix run .#e2e-stress or .#e2e-stress-py312")
+    try:
+        _setup()
+    except BaseException:
+        tearDownModule()
+        raise
+
+
+def _setup():
     global kodi, workdir
     workdir = tempfile.mkdtemp(prefix="yok-e2e-stress-")
     kodi = harness.Kodi(workdir, skin=True)
@@ -52,6 +62,8 @@ class StressTest(unittest.TestCase):
                 kodi.restart_kodi()
             else:
                 kodi.relaunch_after_crash()
+        except harness.KodiHung:
+            return "hung on quit"
         except harness.KodiDied:
             return "crashed during startup"
         time.sleep(SETTLE)

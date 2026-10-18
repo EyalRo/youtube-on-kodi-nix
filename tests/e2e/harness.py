@@ -38,11 +38,31 @@ class KodiDied(RuntimeError):
     """Kodi exited while the harness was waiting for it (a crash, usually)."""
 
 
+class KodiHung(KodiDied):
+    """Kodi was asked to quit and did not (it was killed)."""
+
+
 def free_display():
     for n in range(90, 200):
         if not os.path.exists("/tmp/.X11-unix/X%d" % n) and not os.path.exists("/tmp/.X%d-lock" % n):
             return n
     raise RuntimeError("no free X display")
+
+
+def port_in_use(port):
+    """True if something is listening on the loopback port."""
+    with socket.socket() as sock:
+        sock.settimeout(1)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def wait_port_free(port, timeout):
+    end = time.time() + timeout
+    while time.time() < end:
+        if not port_in_use(port):
+            return True
+        time.sleep(0.25)
+    return False
 
 
 def make_fixture(root, variant):
@@ -144,16 +164,31 @@ class Kodi:
         self._launch_kodi()
 
     def _launch_kodi(self):
+        # A Kodi that is still shutting down keeps the JSON-RPC port; a new Kodi
+        # cannot bind it and then never answers.
+        if not wait_port_free(RPC_PORT, 30):
+            raise RuntimeError("JSON-RPC port %d is still in use; a previous Kodi did not exit" % RPC_PORT)
         self.kodi_proc = subprocess.Popen(
             [os.environ["YOK_KODI"], "--standalone"], env=self.env,
             stdout=open(os.path.join(self.dir, "kodi.out"), "a"), stderr=subprocess.STDOUT,  # noqa: SIM115
             start_new_session=True)  # own process group: the wrapper script's child must die too
         self.procs.append(self.kodi_proc)
-        self._wait(self._rpc_ready, 90, "Kodi JSON-RPC")
+        try:
+            self._wait(self._rpc_ready, 90, "Kodi JSON-RPC")
+        except TimeoutError as e:
+            raise TimeoutError("%s\n--- kodi.log tail ---\n%s\n--- kodi.out tail ---\n%s" % (
+                e, "\n".join(self.log().splitlines()[-25:]), self.out_tail())) from None
         self.rpc("Addons.SetAddonEnabled", addonid=ADDON_ID, enabled=True)
         self.rpc("Addons.SetAddonEnabled", addonid="inputstream.adaptive", enabled=True)
         if self.skin:  # not a system add-on, so disabled until enabled
             self.rpc("Addons.SetAddonEnabled", addonid=SKIN_ID, enabled=True)
+
+    def out_tail(self, lines=15):
+        try:
+            with open(os.path.join(self.dir, "kodi.out"), errors="replace") as f:
+                return "\n".join(f.read().splitlines()[-lines:])
+        except OSError:
+            return ""
 
     def _quit_kodi(self):
         """Quit Kodi and, if a skin is wanted, make it the active skin for the next start.
@@ -162,8 +197,14 @@ class Kodi:
         exit, so the setting has to be changed while Kodi is stopped.
         """
         self.rpc("Application.Quit")
-        self.kodi_proc.wait(30)
+        try:
+            self.kodi_proc.wait(30)
+        except subprocess.TimeoutExpired:
+            self._kill_group(self.kodi_proc)
+            self.procs.remove(self.kodi_proc)
+            raise KodiHung("Kodi did not quit within 30 s") from None
         self.procs.remove(self.kodi_proc)
+        wait_port_free(RPC_PORT, 20)
         if not self.skin:
             return
         path = os.path.join(self.home, ".kodi", "userdata", "guisettings.xml")
@@ -228,21 +269,33 @@ class Kodi:
 
     def stop(self):
         for p in reversed(self.procs):
-            self._signal_group(p, signal.SIGTERM)
-        for p in self.procs:
-            try:
-                p.wait(10)
-            except subprocess.TimeoutExpired:
-                self._signal_group(p, signal.SIGKILL)
-                p.wait()
+            self._kill_group(p)
         self.procs.clear()
+        wait_port_free(RPC_PORT, 20)
 
     @staticmethod
-    def _signal_group(proc, sig):
-        """Signal the process and its children (Kodi runs behind a wrapper script)."""
+    def _kill_group(proc, grace=15):
+        """Terminate the process and its children (Kodi runs behind a wrapper
+        script that exits at once while kodi-x11 is still shutting down)."""
+        for sig, wait_for in ((signal.SIGTERM, grace), (signal.SIGKILL, 5)):
+            try:
+                os.killpg(proc.pid, sig)  # started in its own session: pgid == pid
+            except ProcessLookupError:
+                break
+            end = time.time() + wait_for
+            while time.time() < end:
+                try:
+                    proc.wait(0.2)
+                except subprocess.TimeoutExpired:
+                    continue
+                try:
+                    os.killpg(proc.pid, 0)
+                except ProcessLookupError:
+                    return
+                time.sleep(0.2)
         try:
-            os.killpg(os.getpgid(proc.pid), sig)
-        except ProcessLookupError:
+            proc.wait(5)
+        except subprocess.TimeoutExpired:
             pass
 
     def screenshot(self, path):

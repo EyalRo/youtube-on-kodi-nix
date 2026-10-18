@@ -57,6 +57,7 @@
             export YOK_MESA=${pkgs.mesa}
             export YOK_MASTER=${testMaster}
             export YOK_PORT=${toString testPort}
+            ${if stress then "export YOK_STRESS=1" else ""}
             cd ${./tests/e2e}
             exec python3 -B -m unittest -v ${defaultTests} "$@"
           '';
