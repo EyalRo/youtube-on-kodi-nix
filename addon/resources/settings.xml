@@ -7,4 +7,6 @@
     <setting id="retry_cooldown_minutes" type="slider" label="Retry cooldown after failure (minutes)" range="1,120" option="int" default="10" />
     <setting id="search_max_age_days" type="slider" label="Search cache max age (days)" range="1,90" option="int" default="7" />
     <setting id="search_max_files" type="slider" label="Max search cache files (0 = unlimited)" range="0,500" option="int" default="50" />
+    <setting id="library_dir" type="text" label="Library folder for exported channels (empty = add-on profile)" default="" />
+    <setting id="library_max_videos" type="slider" label="Videos exported per channel" range="5,500" option="int" default="50" />
 </settings>

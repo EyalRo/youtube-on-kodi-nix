@@ -338,6 +338,7 @@ def _entry_to_video(e):
         "thumb": THUMB.format(e["id"]),
         "channel": e.get("channel"),
         "channel_id": e.get("channel_id"),
+        "upload_date": e.get("upload_date"),
     }
 
 
@@ -354,6 +355,25 @@ def read_channels_conf(path):
                 query, name = line, None
             channels.append({"query": query, "name": name})
     return channels
+
+
+def get_dated_videos(channel_id, cache_dir, end=50):
+    """Channel videos with upload dates where known.
+
+    yt-dlp's flat listing rarely has dates; the Atom feed has them for the
+    latest 15 videos, so merge those in. Videos with neither stay undated.
+    """
+    videos = [dict(v) for v in get_channel_videos(channel_id, cache_dir, end=end)]
+    try:
+        feed = {v["id"]: v for v in get_latest_videos(channel_id, limit=15)}
+    except Exception:
+        feed = {}
+    known = {v["id"] for v in videos}
+    for v in videos:
+        if v["id"] in feed:
+            v["published"] = feed[v["id"]]["published"]
+    videos += [dict(v) for i, v in feed.items() if i not in known]
+    return videos
 
 
 def resolve_channel(query):

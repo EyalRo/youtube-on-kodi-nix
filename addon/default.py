@@ -31,6 +31,7 @@ CLEANUP_FILE = os.path.join(PROFILE, "cleanup.json")
 sys.path.insert(0, os.path.join(ADDON_PATH, "resources", "lib"))
 
 import kanyt
+import libexport
 
 
 def get_setting_int(name, default):
@@ -335,6 +336,8 @@ def list_channels():
     add_dir(li, build_url({"mode": "downloads"}))
     li = xbmcgui.ListItem(label="[B]History[/B]")
     add_dir(li, build_url({"mode": "history"}))
+    li = xbmcgui.ListItem(label="[B]Export channels to library[/B]")
+    add_dir(li, build_url({"mode": "export_library"}), isfolder=False)
     li = xbmcgui.ListItem(label="[B]Refresh all caches[/B]")
     add_dir(li, build_url({"mode": "refresh_all"}))
     xbmcplugin.endOfDirectory(HANDLE)
@@ -1129,6 +1132,44 @@ def clear_history():
         xbmc.executebuiltin("Container.Refresh")
 
 
+# --- Library export ---
+
+def log(level, message):
+    levels = {
+        "DEBUG": xbmc.LOGDEBUG,
+        "INFO": xbmc.LOGINFO,
+        "WARN": xbmc.LOGWARNING,
+        "ERROR": xbmc.LOGERROR,
+    }
+    xbmc.log("[{}] {}".format(ADDON.getAddonInfo("id"), message), levels.get(level, xbmc.LOGINFO))
+
+
+def library_dir():
+    path = ADDON.getSetting("library_dir") or os.path.join(PROFILE, "library")
+    return xbmcvfs.translatePath(path)
+
+
+def export_library():
+    """Write every configured channel as a TV show under the library directory."""
+    root = library_dir()
+    max_videos = get_setting_int("library_max_videos", 50)
+    exported = 0
+    for c in kanyt.read_channels_conf(CONF_FILE):
+        ch = kanyt.resolve_cached(c["query"], CACHE_DIR)
+        if not ch:
+            log("ERROR", "cannot resolve channel {!r}; skipped".format(c["query"]))
+            continue
+        ch = {"id": ch["id"], "name": c.get("name") or ch["name"]}
+        try:
+            videos = kanyt.get_dated_videos(ch["id"], CACHE_DIR, end=max_videos)
+            libexport.export_channel(root, ch, videos, max_videos, log)
+            exported += 1
+        except Exception as e:
+            log("ERROR", "export of {} failed: {}".format(ch["name"], e))
+    log("INFO", "library export done: {} channel(s) under {}".format(exported, root))
+    return root
+
+
 # --- Router ---
 
 def router(paramstring):
@@ -1203,6 +1244,9 @@ def router(paramstring):
         list_history()
     elif mode == "hist_clear":
         clear_history()
+    elif mode == "export_library":
+        export_library()
+        xbmc.executebuiltin('UpdateLibrary(video,"{}")'.format(library_dir()))
     elif mode == "refresh_all":
         refresh_all_caches()
     elif mode == "refresh_channel":

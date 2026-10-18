@@ -27,6 +27,16 @@ The add-on source lives in [`addon/`](addon), forked from upstream commit
 5. **Quality setting.** Maximum quality (360p to 2160p) is an add-on setting;
    `maxHeight` in `package.nix` is only its default. Downloads honour it too.
 
+6. **Channels as library TV shows (experimental).** "Export channels to
+   library" in the add-on menu writes each channel as a TV show (`tvshow.nfo`,
+   tagged `YouTube`, plus a `.strm` and episode NFO per video; season = upload
+   year) under the configured library folder. Add that folder as a Video source
+   with content "TV shows" and the "Local information only" scraper, then the
+   export triggers a library scan. Only videos with a known upload date are
+   exported (the latest 15 per channel come from the Atom feed). Files are never
+   deleted, so watched state survives. This is the data layer for the planned
+   home-screen rows.
+
 Kodi treats a local `.m3u8` file as a playlist rather than a stream, so the
 master playlists are served over loopback HTTP by a tiny systemd unit.
 
