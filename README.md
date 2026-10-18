@@ -61,6 +61,18 @@ The add-on source lives in [`addon/`](addon), forked from upstream commit
    rescans the games folder every N minutes (setting "Refresh ... every",
    default 0 = off) and tells Kodi to update its library when files changed.
 
+10. **Estuary Rows skin (experimental).** `skin.nix` builds Kodi's Estuary with
+    one change: a first "Rows" home menu entry whose widgets are the rows
+    (Everything, Movies, TV shows, YouTube channels, shows with unwatched
+    episodes, Games). It is built from the Estuary in your Kodi package plus a
+    small patch ([`skin/`](skin)), so everything else stays stock Estuary.
+    Add it with `kpkgs.callPackage "${inputs.youtube-on-kodi}/skin.nix" { }` (or
+    `inputs.youtube-on-kodi.lib.skinFor kpkgs`) in `kodi.withPackages`, then
+    select it under Settings > Interface > Skin (a newly installed skin is
+    disabled until you enable it under Add-ons > My add-ons > Look and feel).
+
+    ![Home rows](docs/wiki/images/home-rows.png)
+
 Kodi treats a local `.m3u8` file as a playlist rather than a stream, so the
 master playlists are served over loopback HTTP by a tiny systemd unit.
 

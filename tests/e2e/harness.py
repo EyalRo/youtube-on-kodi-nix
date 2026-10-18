@@ -12,6 +12,7 @@ Configuration comes from the environment (set by `nix run .#e2e`):
 import glob
 import json
 import os
+import re
 import shutil
 import socket
 import sqlite3
@@ -25,6 +26,7 @@ from functools import partial
 from threading import Thread
 
 ADDON_ID = "plugin.video.myyoutubers"
+SKIN_ID = "skin.estuary-rows"
 DURATION = 1500  # seconds of fixture video
 VIDEO_ID = "e2eVideo001"
 MEDIA_PORT = 18098
@@ -84,8 +86,9 @@ def stop_servers():
 
 
 class Kodi:
-    def __init__(self, workdir):
+    def __init__(self, workdir, skin=False):
         self.dir = workdir
+        self.skin = skin
         self.home = os.path.join(workdir, "home")
         self.procs = []
         self.state = os.path.join(workdir, "state")
@@ -143,12 +146,33 @@ class Kodi:
         self._wait(self._rpc_up, 90, "Kodi JSON-RPC")
         self.rpc("Addons.SetAddonEnabled", addonid=ADDON_ID, enabled=True)
         self.rpc("Addons.SetAddonEnabled", addonid="inputstream.adaptive", enabled=True)
+        if self.skin:  # not a system add-on, so disabled until enabled
+            self.rpc("Addons.SetAddonEnabled", addonid=SKIN_ID, enabled=True)
 
-    def restart_kodi(self):
-        """Quit Kodi (flushing its databases) and start it again, same profile."""
+    def _quit_kodi(self):
+        """Quit Kodi and, if a skin is wanted, make it the active skin for the next start.
+
+        Kodi loads the skin before JSON-RPC is up and rewrites guisettings.xml on
+        exit, so the setting has to be changed while Kodi is stopped.
+        """
         self.rpc("Application.Quit")
         self.kodi_proc.wait(30)
         self.procs.remove(self.kodi_proc)
+        if not self.skin:
+            return
+        path = os.path.join(self.home, ".kodi", "userdata", "guisettings.xml")
+        with open(path) as f:
+            text = f.read()
+        setting = '<setting id="lookandfeel.skin">%s</setting>' % SKIN_ID
+        text, n = re.subn(r'<setting id="lookandfeel\.skin"[^>]*>[^<]*</setting>', setting, text)
+        if not n:
+            text = text.replace('<settings version="2">', '<settings version="2">' + setting, 1)
+        with open(path, "w") as f:
+            f.write(text)
+
+    def restart_kodi(self):
+        """Quit Kodi (flushing its databases) and start it again, same profile."""
+        self._quit_kodi()
         self._launch_kodi()
 
     def video_db(self):
@@ -165,9 +189,7 @@ class Kodi:
         Kodi has no API for this; it is two columns of the video database's
         path table, so edit it while Kodi is stopped, then restart.
         """
-        self.rpc("Application.Quit")
-        self.kodi_proc.wait(30)
-        self.procs.remove(self.kodi_proc)
+        self._quit_kodi()
         con = sqlite3.connect(self.video_db())
         try:
             for path, content in contents.items():
@@ -193,6 +215,12 @@ class Kodi:
                 p.wait(10)
             except subprocess.TimeoutExpired:
                 p.kill()
+
+    def screenshot(self, path):
+        """Save what Xvfb is showing as a PNG (xwd dump, converted by ffmpeg)."""
+        dump = os.path.join(self.dir, "screen.xwd")
+        subprocess.run(["xwd", "-root", "-display", self.display, "-out", dump], check=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", dump, "-frames:v", "1", path], check=True)
 
     def log(self):
         path = os.path.join(self.home, ".kodi", "temp", "kodi.log")

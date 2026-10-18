@@ -30,12 +30,14 @@
         maxHeight = 1080;
       };
 
-      kodiWithIsa = pkgs: pkgs.kodi.withPackages (k: [ k.inputstream-adaptive k.libretro-nestopia k.controller-topology-project ]);
+      skin = pkgs: pkgs.kodi.packages.callPackage ./skin.nix { };
+
+      kodiWithIsa = pkgs: pkgs.kodi.withPackages (k: [ k.inputstream-adaptive k.libretro-nestopia k.controller-topology-project (k.callPackage ./skin.nix { }) ]);
 
       # Real Kodi (headless, software GL) plays the packaged add-on.
       e2e = pkgs: pkgs.writeShellApplication {
         name = "yok-e2e";
-        runtimeInputs = [ pkgs.python3 pkgs.ffmpeg ];
+        runtimeInputs = [ pkgs.python3 pkgs.ffmpeg pkgs.xorg.xwd ];
         text = ''
           export YOK_ADDON=${testAddon pkgs}/share/kodi/addons/plugin.video.myyoutubers
           export YOK_KODI=${kodiWithIsa pkgs}/bin/kodi
@@ -52,6 +54,7 @@
       packages = forAll (pkgs: {
         default = pkgs.kodi.packages.callPackage ./package.nix { };
         e2e = e2e pkgs;
+        skin = skin pkgs;
       });
 
       # nix run .#e2e
@@ -62,6 +65,10 @@
       # Build the add-on for a specific Kodi variant (kodi-gbm, kodi-wayland, ...):
       #   youtube-on-kodi.lib.addonFor pkgs.kodi-gbm.packages
       lib.addonFor = kodiPackages: kodiPackages.callPackage ./package.nix { };
+
+      # The Estuary Rows skin, for kodi.withPackages:
+      #   youtube-on-kodi.lib.skinFor pkgs.kodi-gbm.packages
+      lib.skinFor = kodiPackages: kodiPackages.callPackage ./skin.nix { };
 
       nixosModules.default = import ./module.nix;
     };

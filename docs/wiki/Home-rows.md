@@ -30,3 +30,33 @@ of its videos is marked watched.
 - Kodi runs one plugin at a time: a second `Addons.ExecuteAddon` pre-empts the
   first, and a call straight after a fresh profile's first start is dropped.
   The e2e tests work around both.
+
+## The skin (Estuary Rows)
+
+`skin.nix` + `skin/estuary-rows.patch` + `skin/Includes_Rows.xml`. Estuary's
+home screen has hardcoded widget rows and no hook for custom ones, so the
+rows needed a skin. The skin is Estuary from the Kodi package with a patch:
+a first menu entry (`yokrows`) and a group of `WidgetListPoster` widgets whose
+`content_path` is the add-on's row directories. The patch touches only
+`Home.xml`, `Includes.xml` and `addon.xml`.
+
+**Verified** (e2e `SkinTest`): the skin loads, "Rows" is the first menu entry
+and the default selection, and widgets 8100..8600 hold the right items in the
+right order. `YOK_SCREENSHOTS=<dir> nix run .#e2e -- test_rows` saves
+`home-rows.png`.
+
+![Home rows](images/home-rows.png)
+
+Findings worth remembering:
+
+- Only enabled add-ons can be the skin, and a skin that is not one of Kodi's
+  system add-ons starts out disabled. Kodi loads the skin before JSON-RPC is
+  up and rewrites `guisettings.xml` on exit, so the e2e harness enables the
+  skin, quits Kodi, sets `lookandfeel.skin` while it is stopped, and relaunches.
+- A skin must be built with `buildKodiAddon` for `kodi.withPackages` to include it.
+- The patch is applied at build time; a Kodi update that changes those Estuary
+  files makes the build fail rather than silently dropping the rows.
+
+Not done: artwork placeholders (cards show Kodi's generic icon without art),
+per-system game rows in the widgets, launching a game from a widget, and
+catalog caching.

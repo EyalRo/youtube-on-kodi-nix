@@ -1,0 +1,52 @@
+--- a/xml/Home.xml
++++ b/xml/Home.xml
+@@ -112,6 +112,16 @@
+ 						<param name="scrollbar_id" value="5010"/>
+ 					</include>
+ 				</control>
++				<control type="group" id="8000">
++					<visible>String.IsEqual(Container(9000).ListItem.Property(id),yokrows)</visible>
++					<include content="Visible_Right_Delayed">
++						<param name="id" value="yokrows"/>
++					</include>
++					<control type="grouplist" id="8001">
++						<include>WidgetGroupListCommon</include>
++						<include>YokRowsWidgets</include>
++					</control>
++				</control>
+ 				<control type="group" id="6000">
+ 					<visible>String.IsEqual(Container(9000).ListItem.Property(id),tvshows)</visible>
+ 					<include content="Visible_Right_Delayed">
+@@ -934,6 +944,13 @@
+ 					</itemlayout>
+ 					<content>
+ 						<item>
++							<label>Rows</label>
++							<onclick>ActivateWindow(Videos,plugin://plugin.video.myyoutubers/?mode=rows,return)</onclick>
++							<property name="menu_id">$NUMBER[8000]</property>
++							<thumb>icons/sidemenu/videos.png</thumb>
++							<property name="id">yokrows</property>
++						</item>
++						<item>
+ 							<label>$LOCALIZE[342]</label>
+ 							<onclick condition="Library.HasContent(movies) + Skin.HasSetting(home_no_categories_widget) + !System.GetBool(myvideos.flatten)">ActivateWindow(Videos,videodb://movies/,return)</onclick>
+ 							<onclick condition="Library.HasContent(movies) + Skin.HasSetting(home_no_categories_widget) + System.GetBool(myvideos.flatten)">ActivateWindow(Videos,videodb://movies/titles/,return)</onclick>
+--- a/xml/Includes.xml
++++ b/xml/Includes.xml
+@@ -2,6 +2,7 @@
+ <includes>
+ 	<include file="Defaults.xml" />
+ 	<include file="Includes_Home.xml" />
++	<include file="Includes_Rows.xml"/>
+ 	<include file="Includes_Animations.xml" />
+ 	<include file="Includes_Games.xml" />
+ 	<include file="Includes_MediaMenu.xml" />
+--- a/addon.xml
++++ b/addon.xml
+@@ -1,5 +1,5 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+-<addon id="skin.estuary" version="4.0.0" name="Estuary" provider-name="phil65, Ichabod Fletchman">
++<addon id="skin.estuary-rows" version="4.0.0.1" name="Estuary Rows" provider-name="phil65, Ichabod Fletchman">
+ 	<requires>
+ 		<import addon="xbmc.gui" version="5.17.0"/>
+ 	</requires>

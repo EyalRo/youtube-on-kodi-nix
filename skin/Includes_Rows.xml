@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<includes>
+	<!-- Rows from the Youtube On Kodi add-on (plugin directories, see rows.py). -->
+	<include name="YokRowsWidgets">
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=everything"/>
+			<param name="widget_header" value="Everything"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8100"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=movies"/>
+			<param name="widget_header" value="Movies"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8200"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=tvshows"/>
+			<param name="widget_header" value="TV shows"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8300"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=channels"/>
+			<param name="widget_header" value="YouTube channels"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8400"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=unwatched"/>
+			<param name="widget_header" value="Shows with unwatched episodes"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8500"/>
+		</include>
+		<include content="WidgetListPoster">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=row&amp;id=games"/>
+			<param name="widget_header" value="Games"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8600"/>
+		</include>
+	</include>
+</includes>

@@ -59,7 +59,7 @@ def _setup():
     test_games.make_nes_rom(os.path.join(roms, "NES", "Test Game (World).nes"))
     write(os.path.join(roms, "NES", "Test Game (World).json"), json.dumps({"released": "1987-05"}))
 
-    kodi = harness.Kodi(workdir)
+    kodi = harness.Kodi(workdir, skin=True)
     kodi.start()
     cache = os.path.join(kodi.profile, "cache")
     write(os.path.join(kodi.profile, "channels.conf"), "@e2e | %s\n" % CHANNEL["name"])
@@ -131,6 +131,48 @@ class RowsTest(unittest.TestCase):
 
     def test_shows_with_unwatched_episodes(self):
         self.check("unwatched", ["E2E Channel"])
+
+
+class SkinTest(unittest.TestCase):
+    """The Estuary Rows home screen shows the rows as widgets."""
+
+    @staticmethod
+    def label(info):
+        return kodi.rpc("XBMC.GetInfoLabels", labels=[info])[info]
+
+    def widget(self, list_id):
+        """(count, labels) of a home widget once it has loaded."""
+        info = "Container(%d).NumItems" % list_id
+        end = time.time() + 40
+        while time.time() < end:
+            n = int(self.label(info) or 0)
+            if n:
+                return n, [self.label("Container(%d).ListItemNoWrap(%d).Label" % (list_id, i)) for i in range(n)]
+            time.sleep(1)
+        return 0, []
+
+    def setUp(self):
+        kodi.rpc("Input.Home")
+        kodi._wait(lambda: self.label("System.CurrentWindow") == "Home", 20, "home window")
+
+    def test_skin_is_active_and_rows_is_the_first_menu_entry(self):
+        self.assertEqual(kodi.rpc("GUI.GetProperties", properties=["skin"])["skin"]["id"], "skin.estuary-rows")
+        self.assertEqual(self.label("Container(9000).ListItemAbsolute(0).Label"), "Rows")
+        self.assertEqual(self.label("Container(9000).ListItem.Property(id)"), "yokrows")
+
+    def test_everything_widget_is_the_first_row(self):
+        self.assertEqual(self.widget(8100), (4, ["E2E Channel", "Plain Show", "Test Movie", "Test Game"]))
+        shots = os.environ.get("YOK_SCREENSHOTS")  # optional: save a picture of the home screen
+        if shots:
+            time.sleep(3)
+            kodi.screenshot(os.path.join(shots, "home-rows.png"))
+
+    def test_other_widgets(self):
+        self.assertEqual(self.widget(8200)[1], ["Test Movie"])
+        self.assertEqual(self.widget(8300)[1], ["Plain Show"])
+        self.assertEqual(self.widget(8400)[1], ["E2E Channel"])
+        self.assertEqual(self.widget(8500)[1], ["E2E Channel"])
+        self.assertEqual(self.widget(8600)[1], ["Test Game"])
 
 
 if __name__ == "__main__":
