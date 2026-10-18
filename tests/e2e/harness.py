@@ -93,11 +93,14 @@ class Kodi:
         self.profile = os.path.join(self.home, ".kodi", "userdata", "addon_data", ADDON_ID)
 
     # -- lifecycle ---------------------------------------------------------
-    def start(self):
+    def start(self, seed=None):
+        """Start Xvfb and Kodi. `seed(profile_dir)` runs before Kodi launches."""
         e = os.environ
         userdata = os.path.join(self.home, ".kodi", "userdata")
         os.makedirs(userdata)
         os.makedirs(self.profile)
+        if seed:
+            seed(self.profile)
         addons = os.path.join(self.home, ".kodi", "addons")
         os.makedirs(addons)
         shutil.copytree(e["YOK_ADDON"], os.path.join(addons, ADDON_ID))

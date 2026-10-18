@@ -23,9 +23,31 @@ in
       default = "youtube-on-kodi";
       description = "Directory name under /run. Must match `masterDir` (/run/<name>) of the package.";
     };
+    libraryDir = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = ''
+        Folder the add-on exports channels to as TV shows. Created for `user`
+        if set. Must match the `libraryDir` the add-on package was built with
+        (or the add-on setting). Add it once in Kodi as a Video source with
+        content "TV shows" and the "Local information only" scraper.
+      '';
+    };
+    gamesDir = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = ''
+        ROM folder, one subfolder per system (NES, Genesis, ...). Created for
+        `user` if set. Must match the `gamesDir` the add-on was built with.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
+    systemd.tmpfiles.rules =
+      map (dir: "d ${dir} 0755 ${cfg.user} - -")
+        (lib.filter (d: d != null) [ cfg.libraryDir cfg.gamesDir ]);
+
     systemd.services.youtube-on-kodi-playlists = {
       description = "Playlist server for the YouTube-On-Kodi add-on";
       wantedBy = [ "multi-user.target" ];

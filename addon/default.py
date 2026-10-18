@@ -33,23 +33,15 @@ CLEANUP_FILE = os.path.join(PROFILE, "cleanup.json")
 sys.path.insert(0, os.path.join(ADDON_PATH, "resources", "lib"))
 
 import kanyt
-import libexport
-import gamescan
+import refresh
 import rows
 
 
 def get_setting_int(name, default):
-    try:
-        return int(ADDON.getSetting(name) or default)
-    except (ValueError, TypeError):
-        return default
+    return refresh.setting_int(ADDON.getSetting, name, default)
 
 
-kanyt.REFRESH_INTERVAL = get_setting_int("refresh_hours", 24) * 3600
-kanyt.CHANNEL_EXPIRE = get_setting_int("channel_expire_days", 30) * 86400
-kanyt.RETRY_COOLDOWN = get_setting_int("retry_cooldown_minutes", 10) * 60
-kanyt.SEARCH_MAX_AGE = get_setting_int("search_max_age_days", 7) * 86400
-kanyt.MAX_HEIGHT = get_setting_int("max_height", kanyt.MAX_HEIGHT)
+refresh.configure(ADDON.getSetting)
 
 os.makedirs(PROFILE, exist_ok=True)
 if not os.path.exists(CONF_FILE):
@@ -1153,55 +1145,25 @@ def log(level, message):
 
 
 def library_dir():
-    path = ADDON.getSetting("library_dir") or os.path.join(PROFILE, "library")
-    return xbmcvfs.translatePath(path)
+    return xbmcvfs.translatePath(refresh.library_dir(PROFILE, ADDON.getSetting))
 
 
 def export_library():
     """Write every configured channel as a TV show under the library directory."""
     root = library_dir()
-    max_videos = get_setting_int("library_max_videos", 50)
-    exported = 0
-    for c in kanyt.read_channels_conf(CONF_FILE):
-        ch = kanyt.resolve_cached(c["query"], CACHE_DIR)
-        if not ch:
-            log("ERROR", "cannot resolve channel {!r}; skipped".format(c["query"]))
-            continue
-        ch = {"id": ch["id"], "name": c.get("name") or ch["name"]}
-        try:
-            videos = kanyt.get_dated_videos(ch["id"], CACHE_DIR, end=max_videos)
-            libexport.export_channel(root, ch, videos, max_videos, log)
-            exported += 1
-        except Exception as e:
-            log("ERROR", "export of {} failed: {}".format(ch["name"], e))
-    log("INFO", "library export done: {} channel(s) under {}".format(exported, root))
+    refresh.export_channels(PROFILE, root, get_setting_int("library_max_videos", 50), log)
     return root
 
 
 # --- Games ---
 
 def load_games():
-    try:
-        with open(GAMES_FILE) as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return data
-    except (OSError, ValueError):
-        pass
-    return []
+    return refresh.load_games(PROFILE)
 
 
 def scan_games():
     """Rescan the ROM folder into games.json; returns the catalog."""
-    root = ADDON.getSetting("games_dir")
-    if not root or not os.path.isdir(root):
-        log("ERROR", "games folder {!r} is not set or does not exist".format(root))
-        return []
-    games = gamescan.scan(
-        root, load_games(), gamescan.load_release_db(RELEASES_DIR), log
-    )
-    kanyt.atomic_write(GAMES_FILE, games)
-    return games
+    return refresh.scan_games(PROFILE, RELEASES_DIR, ADDON.getSetting("games_dir"), log)
 
 
 def play_game(game_id):

@@ -57,6 +57,10 @@ The add-on source lives in [`addon/`](addon), forked from upstream commit
    `everything`, `movies`, `tvshows`, `channels`, `unwatched`, `games`,
    `games:<system>`) that any skin can use as a widget source.
 
+9. **Background refresh (opt-in).** A service re-exports the channels and
+   rescans the games folder every N minutes (setting "Refresh ... every",
+   default 0 = off) and tells Kodi to update its library when files changed.
+
 Kodi treats a local `.m3u8` file as a playlist rather than a stream, so the
 master playlists are served over loopback HTTP by a tiny systemd unit.
 
@@ -101,6 +105,32 @@ systemd.services.kodi.serviceConfig.Environment =
 
 In Kodi: Add-ons > Video add-ons > Youtube On Kodi, then add channels from the
 add-on menu.
+
+### Channels in the library, games and rows
+
+`package.nix` also takes `libraryDir` (where channels are exported as TV
+shows), `gamesDir` (ROM folder, one subfolder per system) and
+`refreshMinutes` (background refresh, 0 = off) as the add-on's default
+settings; the module's `libraryDir` and `gamesDir` options create those folders
+for the Kodi user:
+
+```nix
+services.youtube-on-kodi = {
+  enable = true;
+  libraryDir = "/var/lib/kodi/youtube";
+  gamesDir = "/var/lib/kodi/roms";
+};
+# and: kpkgs.callPackage "${inputs.youtube-on-kodi}/package.nix" {
+#        libraryDir = "/var/lib/kodi/youtube"; gamesDir = "/var/lib/kodi/roms";
+#        refreshMinutes = 360; }
+# plus a libretro core per system, e.g. kpkgs.libretro-nestopia and
+# kpkgs.controller-topology-project
+```
+
+One manual step remains: Kodi cannot be told a folder's content type from
+outside, so add `libraryDir` once in Kodi (Videos > Files > Add videos) as a
+source with content "TV shows" and the scraper "Local information only".
+Movies work the same with content "Movies".
 
 ## Limitations
 
