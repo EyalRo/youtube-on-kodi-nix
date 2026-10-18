@@ -91,6 +91,16 @@
 
       # Newer Pythons come from the unstable nixpkgs: its stock Kodi is built
       # against 3.14, and 3.15 is Kodi rebuilt with python315 (final 3.15.0).
+      # 3.15.0's package set with one build-time check skipped: meson-python's
+      # test_tag_stable_abi fails on the new interpreter, which blocks numpy and
+      # pillow (Kodi's wrapper needs pillow). Only a test, not the runtime.
+      python315Pkgs = u: (u.python315.override {
+        packageOverrides = self: super: {
+          meson-python = super.meson-python.overridePythonAttrs (_: { doCheck = false; });
+        };
+        self = u.python315;
+      }).pkgs;
+
       unstable = pkgs: import nixpkgs-unstable { system = pkgs.stdenv.hostPlatform.system; };
       e2eStress314 = pkgs: let u = unstable pkgs; in e2eFor u {
         name = "yok-e2e-stress-py314"; stress = true; defaultTests = "test_stress";
@@ -100,7 +110,7 @@
       };
       e2eStress315 = pkgs: let u = unstable pkgs; in e2eFor u {
         name = "yok-e2e-stress-py315"; stress = true; defaultTests = "test_stress";
-        kodi = u.kodi.override { python3Packages = u.python315Packages; };
+        kodi = u.kodi.override { python3Packages = python315Pkgs u; };
       };
     in
     {
