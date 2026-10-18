@@ -59,29 +59,37 @@ def _setup():
     test_games.make_nes_rom(os.path.join(roms, "NES", "Test Game (World).nes"))
     write(os.path.join(roms, "NES", "Test Game (World).json"), json.dumps({"released": "1987-05"}))
 
+    def seed(profile):
+        cache = os.path.join(profile, "cache")
+        write(os.path.join(profile, "channels.conf"), "@e2e | %s\n" % CHANNEL["name"])
+        write(os.path.join(cache, "channels.json"), json.dumps({"@e2e": dict(CHANNEL, timestamp=time.time())}))
+        write(os.path.join(cache, CHANNEL["id"] + ".json"),
+              json.dumps({"end": 50, "videos": VIDEOS, "timestamp": time.time(), "retry_after": 0}))
+        # The background service does the export and the games scan (no plugin
+        # call needed): first pass ~20 s after Kodi starts.
+        write(os.path.join(profile, "settings.xml"),
+              '<settings version="2"><setting id="library_dir">%s</setting>'
+              '<setting id="games_dir">%s</setting>'
+              '<setting id="media_refresh_minutes">1</setting></settings>' % (library, roms))
+
     kodi = harness.Kodi(workdir, skin=True)
-    kodi.start()
-    cache = os.path.join(kodi.profile, "cache")
-    write(os.path.join(kodi.profile, "channels.conf"), "@e2e | %s\n" % CHANNEL["name"])
-    write(os.path.join(cache, "channels.json"), json.dumps({"@e2e": dict(CHANNEL, timestamp=time.time())}))
-    write(os.path.join(cache, CHANNEL["id"] + ".json"),
-          json.dumps({"end": 50, "videos": VIDEOS, "timestamp": time.time(), "retry_after": 0}))
-    write(os.path.join(kodi.profile, "settings.xml"),
-          '<settings version="2"><setting id="library_dir">%s</setting>'
-          '<setting id="games_dir">%s</setting></settings>' % (library, roms))
-    kodi.make_sources({library: "tvshows", movies: "movies"})
-    run = lambda **p: kodi.rpc("Addons.ExecuteAddon", addonid=harness.ADDON_ID, params=p)
-    # One plugin run at a time: a second ExecuteAddon pre-empts the first.
-    run(mode="export_library")  # also scans `library`, plain show included
-    kodi._wait(lambda: any(d.startswith(CHANNEL["name"]) for d in os.listdir(library)), 30, "channel export")
-    time.sleep(3)
-    run(mode="scan_games")
+    kodi.start(seed=seed)
+    kodi.make_sources({library: "tvshows", movies: "movies"})  # restarts Kodi
+    kodi._wait(lambda: any(d.startswith(CHANNEL["name"]) for d in os.listdir(library)), 90, "service export")
     kodi._wait(lambda: os.path.exists(os.path.join(kodi.profile, "games.json")), 30, "games.json")
-    kodi.rpc("VideoLibrary.Scan", directory=movies)
-    count = lambda m, k: kodi.rpc(m)["limits"]["total"]
-    kodi._wait(lambda: count("VideoLibrary.GetTVShows", "tvshows") >= 2, 90, "TV shows")
-    kodi._wait(lambda: count("VideoLibrary.GetEpisodes", "episodes") >= 3, 60, "episodes")
-    kodi._wait(lambda: count("VideoLibrary.GetMovies", "movies") >= 1, 60, "movie")
+    kodi.rpc("VideoLibrary.Scan", directory=library)
+    kodi._wait(lambda: kodi.rpc("VideoLibrary.GetTVShows")["limits"]["total"] >= 2, 60, "TV shows")
+    count = lambda m: kodi.rpc(m)["limits"]["total"]
+    kodi._wait(lambda: count("VideoLibrary.GetEpisodes") >= 3, 60, "episodes")
+
+    def movie_scanned():
+        # Kodi runs one scan at a time and drops a request made during another.
+        if not count("VideoLibrary.GetMovies"):
+            kodi.rpc("VideoLibrary.Scan", directory=movies)
+            time.sleep(3)
+        return count("VideoLibrary.GetMovies") >= 1
+
+    kodi._wait(movie_scanned, 90, "movie")
     # Watch one channel video: the channel now has progress and an unwatched episode.
     older = next(e for e in kodi.rpc("VideoLibrary.GetEpisodes", properties=["title"])["episodes"]
                  if e["title"] == "Older video")
@@ -113,6 +121,9 @@ class RowsTest(unittest.TestCase):
         except Exception as e:
             self.fail_with_log(e)
         self.assertEqual(got, expected, row)
+
+    def test_systems_list(self):
+        self.assertEqual(directory(mode="systems"), ["NES (1)"])
 
     def test_row_list(self):
         self.assertEqual(directory(mode="rows"), [
@@ -149,6 +160,9 @@ class SkinTest(unittest.TestCase):
             if n:
                 return n, [self.label("Container(%d).ListItemNoWrap(%d).Label" % (list_id, i)) for i in range(n)]
             time.sleep(1)
+        shots = os.environ.get("YOK_SCREENSHOTS")
+        if shots:  # a picture of the empty widget helps more than the count
+            kodi.screenshot(os.path.join(shots, "empty-widget-%d.png" % list_id))
         return 0, []
 
     def setUp(self):
@@ -173,6 +187,7 @@ class SkinTest(unittest.TestCase):
         self.assertEqual(self.widget(8400)[1], ["E2E Channel"])
         self.assertEqual(self.widget(8500)[1], ["E2E Channel"])
         self.assertEqual(self.widget(8600)[1], ["Test Game"])
+        self.assertEqual(self.widget(8700)[1], ["NES (1)"])  # Games by system
 
 
 if __name__ == "__main__":

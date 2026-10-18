@@ -40,9 +40,7 @@ buildKodiAddon {
                      'label="Library folder for exported channels (empty = add-on profile)" default="${lib.escapeXML libraryDir}"' \
       --replace-fail 'label="ROM folder (one subfolder per system, e.g. NES, Genesis)" default=""' \
                      'label="ROM folder (one subfolder per system, e.g. NES, Genesis)" default="${lib.escapeXML gamesDir}"' \
-      --replace-fail 'option="int" default="0" />
-</settings>' \
-                     'option="int" default="${toString refreshMinutes}" />
-</settings>'
+      --replace-fail 'range="0,15,1440" option="int" default="0"' \
+                     'range="0,15,1440" option="int" default="${toString refreshMinutes}"'
   '';
 }

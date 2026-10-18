@@ -27,6 +27,19 @@ def configure(get_setting):
     kanyt.MAX_HEIGHT = setting_int(get_setting, "max_height", kanyt.MAX_HEIGHT)
 
 
+def catalog_cache_path(profile):
+    return os.path.join(profile, "catalog_cache.json")
+
+
+def invalidate_catalog_cache(profile):
+    """Drop the cached home-rows catalog (the library or a watched state changed)."""
+    try:
+        os.remove(catalog_cache_path(profile))
+        return True
+    except OSError:
+        return False
+
+
 def library_dir(profile, get_setting):
     """Folder the channel export writes to: the setting, else <profile>/library."""
     return get_setting("library_dir") or os.path.join(profile, "library")

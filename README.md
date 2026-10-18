@@ -64,7 +64,7 @@ The add-on source lives in [`addon/`](addon), forked from upstream commit
 10. **Estuary Rows skin (experimental).** `skin.nix` builds Kodi's Estuary with
     one change: a first "Rows" home menu entry whose widgets are the rows
     (Everything, Movies, TV shows, YouTube channels, shows with unwatched
-    episodes, Games). It is built from the Estuary in your Kodi package plus a
+    episodes, Games, and a "Games by system" list). It is built from the Estuary in your Kodi package plus a
     small patch ([`skin/`](skin)), so everything else stays stock Estuary.
     Add it with `kpkgs.callPackage "${inputs.youtube-on-kodi}/skin.nix" { }` (or
     `inputs.youtube-on-kodi.lib.skinFor kpkgs`) in `kodi.withPackages`, then

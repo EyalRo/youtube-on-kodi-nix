@@ -11,4 +11,5 @@
     <setting id="library_max_videos" type="slider" label="Videos exported per channel" range="5,500" option="int" default="50" />
     <setting id="games_dir" type="text" label="ROM folder (one subfolder per system, e.g. NES, Genesis)" default="" />
     <setting id="media_refresh_minutes" type="slider" label="Refresh channel export and games scan every (minutes, 0 = off)" range="0,15,1440" option="int" default="0" />
+    <setting id="catalog_cache_seconds" type="slider" label="Reuse the home rows catalog for (seconds, 0 = never)" range="0,5,300" option="int" default="20" />
 </settings>

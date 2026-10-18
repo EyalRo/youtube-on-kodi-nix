@@ -80,6 +80,18 @@ class GamesTest(unittest.TestCase):
         self.assertEqual((g["title"], g["system"], g["released"], g["released_source"]),
                          ("Test Game", "nes", "1987-05-01", "sidecar"))
 
+    def test_game_card_url_opens_like_a_widget_click(self):
+        """What selecting a game in a row does: open its plugin URL as an item."""
+        (g,) = games()
+        url = "plugin://%s/?mode=game&id=%s" % (harness.ADDON_ID, g["id"])
+        kodi.rpc("Player.Open", item={"file": url})
+        try:
+            kodi._wait(lambda: kodi.rpc("XBMC.GetInfoBooleans", booleans=["Player.HasGame"])["Player.HasGame"],
+                       40, "RetroPlayer to start the game")
+        except Exception as e:
+            self.fail_with_log(e)
+        kodi.stop_playback()
+
     def test_launch_runs_game_in_retroplayer(self):
         (g,) = games()
         kodi.rpc("Addons.ExecuteAddon", addonid=harness.ADDON_ID, params={"mode": "game", "id": g["id"]})

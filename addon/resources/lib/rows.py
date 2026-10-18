@@ -14,6 +14,7 @@ import gamescan
 
 YOUTUBE_TAG = "YouTube"
 LIBRARY_SHOW_URL = "videodb://tvshows/titles/{}/"
+GAME_ICON = "DefaultAddonGame.png"  # a game has no poster; use the skin's game icon
 
 
 def _art(raw):
@@ -68,7 +69,7 @@ def game_items(games, play_url):
         name = gamescan.SYSTEMS.get(g["system"], (g["system"],))[0]
         out.append({
             "kind": "game", "key": "game:%s" % g["id"], "title": g["title"], "date": g.get("released"),
-            "art": _art(None), "url": play_url(g), "is_folder": False, "playable": False,
+            "art": _art({"thumb": GAME_ICON}), "url": play_url(g), "is_folder": False, "playable": False,
             "label2": name, "system": g["system"],
         })
     return out
@@ -121,9 +122,20 @@ def list_rows(items):
     return out
 
 
+def system_rows(items):
+    """[(id, label, count)] of the per-system games rows that have games."""
+    return [r for r in list_rows(items) if r[0].startswith("games:")]
+
+
 def build_row(row_id, items):
-    """The items of one row in display order; unknown ids give None."""
+    """The items of one row in display order; unknown ids give None.
+
+    Hidden rows (a known system with no games) are empty lists.
+    """
     for rid, _, flt, field in row_definitions(items):
         if rid == row_id:
             return sort_newest([i for i in items if flt(i)], field)
+    # A system we support but have no games for is an empty row, not an error.
+    if row_id.startswith("games:") and row_id[6:] in gamescan.SYSTEMS:
+        return []
     return None

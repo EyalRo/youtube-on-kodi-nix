@@ -38,5 +38,13 @@
 			<param name="widget_target" value="videos"/>
 			<param name="list_id" value="8600"/>
 		</include>
+		<!-- One widget for all systems: Kodi starts every widget's script at once,
+		     and many at once crash its embedded Python (see docs/wiki/Home-rows). -->
+		<include content="WidgetListCategories">
+			<param name="content_path" value="plugin://plugin.video.myyoutubers/?mode=systems"/>
+			<param name="widget_header" value="Games by system"/>
+			<param name="widget_target" value="videos"/>
+			<param name="list_id" value="8700"/>
+		</include>
 	</include>
 </includes>

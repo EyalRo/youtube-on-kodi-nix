@@ -53,3 +53,17 @@ start" ignoring history.
   not available in the sandbox. Worth adding to CI on a KVM runner.
 - Screenshots: Kodi can capture via `Input.ExecuteAction`/`screenshot`
   builtin; useful for skin work later.
+
+## Notes from the library, games, rows and skin tests
+
+- `ExecuteAddon` is unreliable right after a fresh profile's first start and
+  when several run at once (each pre-empts the previous). Prefer the
+  background service (`media_refresh_minutes`) plus `VideoLibrary.Scan` for
+  setup, and retry scans (Kodi drops a scan requested during another).
+- A non-system skin is disabled until enabled; Kodi loads the skin before
+  JSON-RPC is up and rewrites `guisettings.xml` on exit, so the harness
+  enables it, quits, sets `lookandfeel.skin`, and relaunches.
+- Kodi runs behind a wrapper script; the harness starts it in its own process
+  group and kills the group, or an orphaned Kodi keeps the JSON-RPC port.
+- `YOK_SCREENSHOTS=<dir>` saves screenshots (`xwd` + ffmpeg); `YOK_KEEP=1`
+  keeps the temp Kodi home, `kodi.log` and any crash log.

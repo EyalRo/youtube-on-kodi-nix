@@ -46,8 +46,17 @@ def refresh_once(addon):
         )
 
 
+class Monitor(xbmc.Monitor):
+    """Drops the home-rows catalog cache whenever the video library changes."""
+
+    def onNotification(self, sender, method, data):
+        if method.startswith("VideoLibrary.On") or method == "Player.OnStop":
+            if refresh.invalidate_catalog_cache(PROFILE):
+                log("DEBUG", "catalog cache dropped on {}".format(method))
+
+
 def main():
-    monitor = xbmc.Monitor()
+    monitor = Monitor()
     log("INFO", "refresh service started")
     if monitor.waitForAbort(INITIAL_DELAY):
         return

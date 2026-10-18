@@ -1193,7 +1193,10 @@ def jsonrpc(method, **params):
     return reply.get("result", {})
 
 
-def load_catalog():
+CATALOG_CACHE = refresh.catalog_cache_path(PROFILE)
+
+
+def fetch_catalog():
     """Movies, TV shows/channels and games as one list of row items."""
     movies = jsonrpc(
         "VideoLibrary.GetMovies", properties=["title", "premiered", "year", "art", "file"]
@@ -1215,10 +1218,45 @@ def load_catalog():
     return items
 
 
+def load_catalog():
+    """The catalog, reused briefly: a home screen asks once per widget.
+
+    The background service deletes the cache on library notifications, so the
+    TTL is only a backstop for when the service is not running.
+    """
+    ttl = get_setting_int("catalog_cache_seconds", 20)
+    try:
+        games_stamp = os.path.getmtime(GAMES_FILE)
+    except OSError:
+        games_stamp = 0
+    if ttl > 0:
+        try:
+            with open(CATALOG_CACHE) as f:
+                cached = json.load(f)
+            if time.time() - cached["time"] < ttl and cached["games"] == games_stamp:
+                return cached["items"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    items = fetch_catalog()
+    if ttl > 0:
+        kanyt.atomic_write(CATALOG_CACHE, {"time": time.time(), "games": games_stamp, "items": items})
+    return items
+
+
 def list_rows():
     for rid, label, count in rows.list_rows(load_catalog()):
         li = xbmcgui.ListItem(label="{} ({})".format(label, count))
         li.setInfo("video", {"title": label, "plot": label})
+        add_dir(li, build_url({"mode": "row", "id": rid}))
+    xbmcplugin.endOfDirectory(HANDLE)
+
+
+def list_systems():
+    """One card per game system that has games, each opening that system's row."""
+    for rid, label, count in rows.system_rows(load_catalog()):
+        li = xbmcgui.ListItem(label="{} ({})".format(label, count))
+        li.setInfo("video", {"title": label, "plot": "{} games".format(count)})
+        li.setArt({"thumb": rows.GAME_ICON, "icon": rows.GAME_ICON})
         add_dir(li, build_url({"mode": "row", "id": rid}))
     xbmcplugin.endOfDirectory(HANDLE)
 
@@ -1321,6 +1359,8 @@ def router(paramstring):
         xbmc.executebuiltin('UpdateLibrary(video,"{}")'.format(library_dir()))
     elif mode == "rows":
         list_rows()
+    elif mode == "systems":
+        list_systems()
     elif mode == "row":
         list_row(params.get("id", ""))
     elif mode == "scan_games":

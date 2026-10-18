@@ -145,6 +145,26 @@ class AddonTest(unittest.TestCase):
         labels = [c[0][2].label for c in default.xbmcplugin.addDirectoryItem.call_args_list]
         self.assertEqual(labels, ["Everything (2)", "Movies (1)", "YouTube channels (1)"])
 
+    def test_catalog_is_cached_for_the_ttl(self):
+        import json
+        calls = []
+
+        def fake_rpc(req):
+            calls.append(json.loads(req)["method"])
+            return json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}})
+
+        sys.argv = ["plugin://plugin.video.myyoutubers/", "7", ""]
+        sys.modules.pop("default", None)
+        sys.path.insert(0, ADDON)
+        default = importlib.import_module("default")
+        default.xbmc.executeJSONRPC.side_effect = fake_rpc
+        default.load_catalog()
+        default.load_catalog()
+        self.assertEqual(len(calls), 3)  # movies, shows, episodes: once, not twice
+        default.ADDON.getSetting.side_effect = lambda k: "0" if k == "catalog_cache_seconds" else ""
+        default.load_catalog()
+        self.assertEqual(len(calls), 6)  # ttl 0: always fresh
+
 
 if __name__ == "__main__":
     unittest.main()

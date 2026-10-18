@@ -57,6 +57,33 @@ Findings worth remembering:
 - The patch is applied at build time; a Kodi update that changes those Estuary
   files makes the build fail rather than silently dropping the rows.
 
-Not done: artwork placeholders (cards show Kodi's generic icon without art),
-per-system game rows in the widgets, launching a game from a widget, and
-catalog caching.
+### Widget count: Kodi crashes with too many at once
+
+Kodi starts every home widget's plugin script at the same moment. With 15
+widgets (one per game system) Kodi 21.3 **segfaulted** during startup inside its
+embedded Python (`_PyThreadState_MustExit`, libpython 3.13); runs with 6 or 7
+widgets never did. So the skin has 7: the six rows plus one "Games by system"
+card list (`mode=systems`), whose cards open the per-system rows
+(`mode=row&id=games:<system>`). `test_skin_stays_under_the_widget_limit` caps
+the count at 8. This probably also explains intermittent e2e failures seen
+earlier (empty widgets, dropped `ExecuteAddon` calls) while widgets were being
+added.
+
+### Catalog cache
+
+Each widget request would rebuild the catalog (three library queries), so it is
+cached in `catalog_cache.json` for `catalog_cache_seconds` (default 20). The
+background service deletes the cache on `VideoLibrary.On*` notifications and
+`Player.OnStop` (watched state), so widgets refresh right after a library
+change; a TTL alone served a stale, empty catalog right after a library
+update. Without the service, only the TTL applies.
+
+### Game cards
+
+A game's card uses `DefaultAddonGame.png`. Selecting it opens
+`plugin://...?mode=game&id=<id>`, which launches it in RetroPlayer (e2e
+`test_game_card_url_opens_like_a_widget_click`). A supported system with no
+games is an empty row, not an error.
+
+Not done: movie/show artwork fallbacks beyond Kodi's own, per-row sort
+controls, and a skin screenshot with real artwork.

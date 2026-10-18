@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import sqlite3
 import subprocess
@@ -134,14 +135,15 @@ class Kodi:
         self.env = env
         self.procs.append(subprocess.Popen(
             [e["YOK_XVFB"], self.display, "-screen", "0", "1280x720x24", "+extension", "GLX", "-noreset"],
-            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True))
         self._wait(lambda: os.path.exists("/tmp/.X11-unix/X%s" % self.display[1:]), 30, "Xvfb")
         self._launch_kodi()
 
     def _launch_kodi(self):
         self.kodi_proc = subprocess.Popen(
             [os.environ["YOK_KODI"], "--standalone"], env=self.env,
-            stdout=open(os.path.join(self.dir, "kodi.out"), "a"), stderr=subprocess.STDOUT)  # noqa: SIM115
+            stdout=open(os.path.join(self.dir, "kodi.out"), "a"), stderr=subprocess.STDOUT,  # noqa: SIM115
+            start_new_session=True)  # own process group: the wrapper script's child must die too
         self.procs.append(self.kodi_proc)
         self._wait(self._rpc_up, 90, "Kodi JSON-RPC")
         self.rpc("Addons.SetAddonEnabled", addonid=ADDON_ID, enabled=True)
@@ -209,12 +211,22 @@ class Kodi:
 
     def stop(self):
         for p in reversed(self.procs):
-            p.terminate()
+            self._signal_group(p, signal.SIGTERM)
         for p in self.procs:
             try:
                 p.wait(10)
             except subprocess.TimeoutExpired:
-                p.kill()
+                self._signal_group(p, signal.SIGKILL)
+                p.wait()
+        self.procs.clear()
+
+    @staticmethod
+    def _signal_group(proc, sig):
+        """Signal the process and its children (Kodi runs behind a wrapper script)."""
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except ProcessLookupError:
+            pass
 
     def screenshot(self, path):
         """Save what Xvfb is showing as a PNG (xwd dump, converted by ffmpeg)."""

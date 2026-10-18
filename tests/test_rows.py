@@ -79,6 +79,10 @@ class RowsTest(unittest.TestCase):
 
     def test_unknown_row(self):
         self.assertIsNone(rows.build_row("nope", catalog()))
+        self.assertIsNone(rows.build_row("games:atari", catalog()))
+
+    def test_supported_system_without_games_is_an_empty_row(self):
+        self.assertEqual(rows.build_row("games:snes", catalog()), [])
 
     def test_show_item_links_to_library_and_game_to_launch_url(self):
         by = {i["title"]: i for i in catalog()}
@@ -86,6 +90,34 @@ class RowsTest(unittest.TestCase):
         self.assertTrue(by["Breaking Bad"]["is_folder"])
         self.assertEqual(by["Zelda"]["url"], "plugin://x/?mode=game&id=g1")
         self.assertFalse(by["Zelda"]["is_folder"])
+
+
+class SkinWidgetsTest(unittest.TestCase):
+    def xml(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "skin", "Includes_Rows.xml")
+        with open(path) as f:
+            return f.read()
+
+    def test_skin_has_a_widget_for_every_row_and_the_systems_list(self):
+        xml = self.xml()
+        for rid in [r[0] for r in rows.FIXED_ROWS]:
+            self.assertIn("mode=row&amp;id=%s\"" % rid, xml, rid)
+        self.assertIn("mode=systems\"", xml)
+        ids = [int(i) for i in __import__("re").findall(r'name="list_id" value="(\d+)"', xml)]
+        self.assertEqual(len(ids), len(set(ids)), "widget list ids must be unique")
+
+    def test_skin_stays_under_the_widget_limit(self):
+        # Kodi starts every widget's script at once; 15 at once segfaulted its
+        # embedded Python (e2e, Kodi 21.3). 6-7 never did. Don't add more.
+        self.assertLessEqual(self.xml().count('<include content="WidgetList'), 8)
+
+    def test_games_have_an_icon(self):
+        (item,) = rows.game_items([GAMES[0]], lambda g: "x")
+        self.assertEqual(item["art"]["thumb"], rows.GAME_ICON)
+
+    def test_system_rows_only_lists_systems_with_games(self):
+        self.assertEqual(rows.system_rows(catalog()),
+                         [("games:genesis", "Genesis", 1), ("games:nes", "NES", 2)])
 
 
 if __name__ == "__main__":
