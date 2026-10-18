@@ -30,21 +30,21 @@ class ExportTest(unittest.TestCase):
         libexport.export_channel(self.root, CH, [vid("a", "2024-03-05T10:00:00+00:00")], log=self.log)
         self.assertEqual(os.path.basename(self.folder()), "Some Channel Name [UC123]")
         files = sorted(os.listdir(self.folder()))
-        self.assertEqual(files, ["2024-03-05 - Title a [a].nfo", "2024-03-05 - Title a [a].strm", "tvshow.nfo"])
+        self.assertEqual(files, ["S2024E6500 - 2024-03-05 - Title a [a].nfo", "S2024E6500 - 2024-03-05 - Title a [a].strm", "tvshow.nfo"])
         show = ET.parse(os.path.join(self.folder(), "tvshow.nfo")).getroot()
         self.assertEqual(show.find("tag").text, "YouTube")
-        ep = ET.parse(os.path.join(self.folder(), "2024-03-05 - Title a [a].nfo")).getroot()
+        ep = ET.parse(os.path.join(self.folder(), "S2024E6500 - 2024-03-05 - Title a [a].nfo")).getroot()
         self.assertEqual(ep.find("season").text, "2024")
         self.assertEqual(ep.find("aired").text, "2024-03-05")
         self.assertEqual(ep.find("episode").text, str(65 * 100))
-        with open(os.path.join(self.folder(), "2024-03-05 - Title a [a].strm")) as f:
+        with open(os.path.join(self.folder(), "S2024E6500 - 2024-03-05 - Title a [a].strm")) as f:
             self.assertTrue(f.read().startswith("plugin://plugin.video.myyoutubers/?mode=play&id=a&"))
 
     def test_episode_numbers_stable_under_backfill(self):
         newer = vid("n", "2024-06-01T00:00:00Z")
         libexport.export_channel(self.root, CH, [newer], log=self.log)
         libexport.export_channel(self.root, CH, [newer, vid("o", "2024-01-02T00:00:00Z")], log=self.log)
-        ep = ET.parse(os.path.join(self.folder(), "2024-06-01 - Title n [n].nfo")).getroot()
+        ep = ET.parse(os.path.join(self.folder(), "S2024E15300 - 2024-06-01 - Title n [n].nfo")).getroot()
         # day-of-year of 2024-06-01 is 153 (leap year)
         self.assertEqual(int(ep.find("episode").text), 15300)
 
@@ -60,7 +60,7 @@ class ExportTest(unittest.TestCase):
                   vid("c", upload_date="20240301"), vid("d")]
         libexport.export_channel(self.root, CH, videos, max_videos=2, log=self.log)
         strms = sorted(f for f in os.listdir(self.folder()) if f.endswith(".strm"))
-        self.assertEqual([s[:10] for s in strms], ["2024-02-01", "2024-03-01"])
+        self.assertEqual([s.split(" - ")[1] for s in strms], ["2024-02-01", "2024-03-01"])
         self.assertIn("WARN", [lvl for lvl, _ in self.logs])
 
     def test_rerun_is_idempotent_and_never_deletes(self):

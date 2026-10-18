@@ -5,8 +5,8 @@ Pure Python, no Kodi imports: callers pass a `log(level, message)` callable.
 Layout, one folder per channel under `root`:
 
     <Channel> [<channel id>]/tvshow.nfo
-    <Channel> [<channel id>]/<yyyy-mm-dd> - <title> [<video id>].strm
-    <Channel> [<channel id>]/<yyyy-mm-dd> - <title> [<video id>].nfo
+    <Channel> [<channel id>]/S<year>E<n> - <yyyy-mm-dd> - <title> [<video id>].strm
+    <Channel> [<channel id>]/S<year>E<n> - <yyyy-mm-dd> - <title> [<video id>].nfo
 
 Season is the upload year. The episode number is day-of-year * 100 plus the
 rank among that day's uploads, so numbers stay stable when older videos are
@@ -128,7 +128,10 @@ def export_channel(root, channel, videos, max_videos=50, log=lambda level, msg: 
         rank = per_day.get(date, 0)
         per_day[date] = rank + 1
         episode = date.timetuple().tm_yday * 100 + rank
-        base = os.path.join(folder, "{} - {} [{}]".format(date.isoformat(), safe_name(v["title"]), v["id"]))
+        # Kodi numbers episodes from the filename first; an explicit SxxExx
+        # keeps it from matching patterns inside the title or video id.
+        base = os.path.join(folder, "S{}E{} - {} - {} [{}]".format(
+            date.year, episode, date.isoformat(), safe_name(v["title"]), v["id"]))
         changed += _write_if_changed(base + ".strm", strm_url(v) + "\n")
         changed += _write_if_changed(base + ".nfo", episode_nfo(channel, v, date, episode))
     log("INFO", "{}: exported {} video(s), {} file(s) changed".format(channel["name"], len(dated), changed))

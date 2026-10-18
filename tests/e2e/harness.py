@@ -9,10 +9,12 @@ Configuration comes from the environment (set by `nix run .#e2e`):
   YOK_MASTER master playlist dir the add-on was built with
   YOK_PORT   playlist server port the add-on was built with
 """
+import glob
 import json
 import os
 import shutil
 import socket
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -111,16 +113,57 @@ class Kodi:
         )
         self.display = ":%d" % free_display()
         env["DISPLAY"] = self.display
+        self.env = env
         self.procs.append(subprocess.Popen(
             [e["YOK_XVFB"], self.display, "-screen", "0", "1280x720x24", "+extension", "GLX", "-noreset"],
             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
         self._wait(lambda: os.path.exists("/tmp/.X11-unix/X%s" % self.display[1:]), 30, "Xvfb")
-        self.procs.append(subprocess.Popen(
-            [e["YOK_KODI"], "--standalone"], env=env,
-            stdout=open(os.path.join(self.dir, "kodi.out"), "w"), stderr=subprocess.STDOUT))  # noqa: SIM115
+        self._launch_kodi()
+
+    def _launch_kodi(self):
+        self.kodi_proc = subprocess.Popen(
+            [os.environ["YOK_KODI"], "--standalone"], env=self.env,
+            stdout=open(os.path.join(self.dir, "kodi.out"), "a"), stderr=subprocess.STDOUT)  # noqa: SIM115
+        self.procs.append(self.kodi_proc)
         self._wait(self._rpc_up, 90, "Kodi JSON-RPC")
         self.rpc("Addons.SetAddonEnabled", addonid=ADDON_ID, enabled=True)
         self.rpc("Addons.SetAddonEnabled", addonid="inputstream.adaptive", enabled=True)
+
+    def restart_kodi(self):
+        """Quit Kodi (flushing its databases) and start it again, same profile."""
+        self.rpc("Application.Quit")
+        self.kodi_proc.wait(30)
+        self.procs.remove(self.kodi_proc)
+        self._launch_kodi()
+
+    def video_db(self):
+        (path,) = glob.glob(os.path.join(self.home, ".kodi", "userdata", "Database", "MyVideos*.db"))
+        return path
+
+    def make_tvshow_source(self, path):
+        """Set `path` to content "TV shows", local information only.
+
+        Kodi has no API for this; it is two columns of the video database's
+        path table, so edit it while Kodi is stopped, then restart.
+        """
+        self.rpc("Application.Quit")
+        self.kodi_proc.wait(30)
+        self.procs.remove(self.kodi_proc)
+        path = path.rstrip("/") + "/"
+        con = sqlite3.connect(self.video_db())
+        try:
+            row = con.execute("SELECT idPath FROM path WHERE strPath=?", (path,)).fetchone()
+            if row:
+                con.execute("UPDATE path SET strContent='tvshows', strScraper='metadata.local' "
+                            "WHERE idPath=?", (row[0],))
+            else:
+                con.execute("INSERT INTO path (strPath, strContent, strScraper, scanRecursive, "
+                            "useFolderNames, noUpdate, exclude) VALUES (?, 'tvshows', "
+                            "'metadata.local', 0, 0, 0, 0)", (path,))
+            con.commit()
+        finally:
+            con.close()
+        self._launch_kodi()
 
     def stop(self):
         for p in reversed(self.procs):

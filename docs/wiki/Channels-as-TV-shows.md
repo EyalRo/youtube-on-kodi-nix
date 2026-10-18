@@ -45,3 +45,17 @@ add-on history otherwise.
   in several.)
 - Shorts and live streams: filter or separate "season".
 - Art: channel avatar/banner for poster/fanart (yt-dlp provides thumbnails).
+
+## Verified (Kodi 21.3, e2e `test_library`)
+
+- A channel exported as `tvshow.nfo` + `.strm` + episode NFO imports as a TV
+  show with the `YouTube` tag; episodes carry the NFO's aired date.
+- The library stores the `.strm` file path (not the bare video ID), and
+  opening an episode from the library plays through the add-on. The
+  forum-reported risk did not reproduce.
+- Season and episode numbers must be in the filename (`S<year>E<n> - ...`).
+  Without it Kodi's filename regexes matched text inside the video ID
+  (`e2e...` read as episode 2, season 1) and ignored the NFO numbers.
+- There is no API for a source's content type; the e2e sets `strContent` and
+  `strScraper` (`tvshows` / `metadata.local`) in the video database's `path`
+  table while Kodi is stopped. In use, the user adds the source in the GUI.
