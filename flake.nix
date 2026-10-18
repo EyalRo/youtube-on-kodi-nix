@@ -91,13 +91,19 @@
 
       # Newer Pythons come from the unstable nixpkgs: its stock Kodi is built
       # against 3.14, and 3.15 is Kodi rebuilt with python315 (final 3.15.0).
-      # 3.15.0's package set with one build-time check skipped: meson-python's
-      # test_tag_stable_abi fails on the new interpreter, which blocks numpy and
-      # pillow (Kodi's wrapper needs pillow). Only a test, not the runtime.
+      # 3.15.0's package set with build-time test suites switched off. Several
+      # fail on the new interpreter (meson-python, hypothesis, ...) and would
+      # block numpy and pillow, which Kodi's wrapper needs. Only tests are
+      # skipped; what the packages do at runtime is unchanged.
       python315Pkgs = u: (u.python315.override {
-        packageOverrides = self: super: {
-          meson-python = super.meson-python.overridePythonAttrs (_: { doCheck = false; });
-        };
+        packageOverrides = self: super:
+          let
+            noChecks = name: pkg:
+              let r = builtins.tryEval (u.lib.isDerivation pkg && pkg ? overridePythonAttrs);
+              in if r.success && r.value
+                 then pkg.overridePythonAttrs (_: { doCheck = false; doInstallCheck = false; })
+                 else pkg;
+          in builtins.mapAttrs noChecks super;
         self = u.python315;
       }).pkgs;
 

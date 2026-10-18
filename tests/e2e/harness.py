@@ -253,7 +253,8 @@ class Kodi:
 
     def relaunch_after_crash(self):
         """Start Kodi again after it died (the dead process is dropped first)."""
-        self.procs.remove(self.kodi_proc)
+        if self.kodi_proc in self.procs:  # a hung-and-killed Kodi was already dropped
+            self.procs.remove(self.kodi_proc)
         self.kodi_proc.wait()
         self._launch_kodi()
 
