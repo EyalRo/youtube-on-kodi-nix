@@ -14,6 +14,7 @@ pages record *why* things are the way they are.
 | [Unified "next up" view](Unified-next-up-view) | Research / design |
 | [Games](Games) | Scanner implemented; launch verified in e2e |
 | [Home rows](Home-rows) | Implemented; verified in e2e |
+| [Rust appliance feasibility](Rust-appliance-feasibility) | Research: what exists, what is missing |
 | [Channel management and subscriptions](Channel-management-and-subscriptions) | Research / design |
 
 Conventions used in these pages: **Verified** means reproduced here with
