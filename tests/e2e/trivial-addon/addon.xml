@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.yok-trivial" name="YOK Trivial" version="1.0.0" provider-name="local">
+    <requires>
+        <import addon="xbmc.python" version="3.0.0"/>
+    </requires>
+    <extension point="xbmc.python.pluginsource" library="default.py">
+        <provides>video</provides>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary lang="en">Does nothing, quickly (Python crash experiment)</summary>
+        <description lang="en">A plugin whose script imports almost nothing and returns an empty directory. Used by the e2e stress test to separate the cost of starting a script from the work it does.</description>
+        <platform>all</platform>
+        <license>GPL-2.0-or-later</license>
+    </extension>
+</addon>

@@ -28,6 +28,7 @@ from threading import Thread
 
 ADDON_ID = "plugin.video.myyoutubers"
 SKIN_ID = "skin.estuary-rows"
+TRIVIAL_ID = "plugin.video.yok-trivial"
 DURATION = 1500  # seconds of fixture video
 VIDEO_ID = "e2eVideo001"
 MEDIA_PORT = 18098
@@ -136,6 +137,8 @@ class Kodi:
         addons = os.path.join(self.home, ".kodi", "addons")
         os.makedirs(addons)
         shutil.copytree(e["YOK_ADDON"], os.path.join(addons, ADDON_ID))
+        if e.get("YOK_TRIVIAL_ADDON"):  # experiment: a do-nothing plugin for the widgets
+            shutil.copytree(e["YOK_TRIVIAL_ADDON"], os.path.join(addons, TRIVIAL_ID))
         with open(os.path.join(userdata, "guisettings.xml"), "w") as f:
             f.write('<settings version="2">'
                     '<setting id="services.webserver">true</setting>'
@@ -197,6 +200,8 @@ class Kodi:
                 e, "\n".join(self.log().splitlines()[-25:]), self.out_tail())) from None
         self.rpc("Addons.SetAddonEnabled", addonid=ADDON_ID, enabled=True)
         self.rpc("Addons.SetAddonEnabled", addonid="inputstream.adaptive", enabled=True)
+        if os.environ.get("YOK_TRIVIAL_ADDON"):
+            self.rpc("Addons.SetAddonEnabled", addonid=TRIVIAL_ID, enabled=True)
         if self.skin:  # not a system add-on, so disabled until enabled
             self.rpc("Addons.SetAddonEnabled", addonid=SKIN_ID, enabled=True)
 

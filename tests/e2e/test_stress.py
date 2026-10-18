@@ -36,9 +36,10 @@ def setUpModule():
 def _setup():
     global kodi, workdir
     workdir = tempfile.mkdtemp(prefix="yok-e2e-stress-")
-    kodi = harness.Kodi(workdir, skin=True, startup_retries=0)  # count crashes, don't hide them
+    kodi = harness.Kodi(workdir, skin=True)  # setup launches may retry; the counted ones do not
     kodi.start()
     kodi.restart_kodi()  # the skin only becomes active on the next launch
+    kodi.startup_retries = 0  # from here every crash is counted, none is hidden
 
 
 def tearDownModule():
@@ -51,7 +52,9 @@ def tearDownModule():
 
 def widget_scripts_started():
     """How many row/system plugin scripts the current Kodi run started."""
-    return len(re.findall(r"running add-on script Youtube On Kodi\(.*\?mode=(?:row|systems)", kodi.log()))
+    return len(re.findall(
+        r"running add-on script [^(]*\('plugin://plugin\.video\.(?:myyoutubers|yok-trivial)/', '\d+', '\?mode=(?:row|systems)",
+        kodi.log()))
 
 
 class StressTest(unittest.TestCase):

@@ -46,26 +46,28 @@
       kodiPy312 = pkgs: pkgs.kodi.override { python3Packages = pkgs.python312Packages; };
 
       # Kodi with what the e2e tests need. `stress` swaps in the 15-widget skin.
-      kodiEnv = kodi: stress: kodi.withPackages (k: [
+      kodiEnv = kodi: stress: trivial: kodi.withPackages (k: [
         k.inputstream-adaptive
         k.libretro-nestopia
         k.controller-topology-project
-        (k.callPackage ./skin.nix { stressWidgets = stress; })
+        (k.callPackage ./skin.nix ({ stressWidgets = stress; }
+          // (if trivial then { stressPlugin = "plugin.video.yok-trivial"; } else { })))
       ]);
 
       # Real Kodi (headless, software GL) plays the packaged add-on.
-      e2eFor = pkgs: { kodi ? pkgs.kodi, stress ? false, name ? "yok-e2e", defaultTests ? "" }:
+      e2eFor = pkgs: { kodi ? pkgs.kodi, stress ? false, trivial ? false, name ? "yok-e2e", defaultTests ? "" }:
         pkgs.writeShellApplication {
           inherit name;
           runtimeInputs = [ pkgs.python3 pkgs.ffmpeg pkgs.xorg.xwd ];
           text = ''
             export YOK_ADDON=${testAddon pkgs kodi}/share/kodi/addons/plugin.video.myyoutubers
-            export YOK_KODI=${kodiEnv kodi stress}/bin/kodi
+            export YOK_KODI=${kodiEnv kodi stress trivial}/bin/kodi
             export YOK_XVFB=${pkgs.xorg-server}/bin/Xvfb
             export YOK_MESA=${pkgs.mesa}
             export YOK_MASTER=${testMaster}
             export YOK_PORT=${toString testPort}
             ${if stress then "export YOK_STRESS=1" else ""}
+            ${if trivial then "export YOK_TRIVIAL_ADDON=${./tests/e2e/trivial-addon}" else ""}
             cd ${./tests/e2e}
             exec python3 -B -m unittest -v ${defaultTests} "$@"
           '';
@@ -81,11 +83,20 @@
         name = "yok-e2e-stress-py312"; kodi = kodiPy312 pkgs; stress = true; defaultTests = "test_stress";
       };
 
+      # The same 15 widgets, but each runs a trivial plugin (imports nothing, empty
+      # list): separates the cost of starting a script from the work it does.
+      e2eStressTrivial = pkgs: e2eFor pkgs {
+        name = "yok-e2e-stress-trivial"; stress = true; trivial = true; defaultTests = "test_stress";
+      };
+
       # Newer Pythons come from the unstable nixpkgs: its stock Kodi is built
       # against 3.14, and 3.15 is Kodi rebuilt with python315 (final 3.15.0).
       unstable = pkgs: import nixpkgs-unstable { system = pkgs.stdenv.hostPlatform.system; };
       e2eStress314 = pkgs: let u = unstable pkgs; in e2eFor u {
         name = "yok-e2e-stress-py314"; stress = true; defaultTests = "test_stress";
+      };
+      e2eStressTrivial314 = pkgs: let u = unstable pkgs; in e2eFor u {
+        name = "yok-e2e-stress-trivial-py314"; stress = true; trivial = true; defaultTests = "test_stress";
       };
       e2eStress315 = pkgs: let u = unstable pkgs; in e2eFor u {
         name = "yok-e2e-stress-py315"; stress = true; defaultTests = "test_stress";
@@ -100,6 +111,8 @@
         e2e-stress-py312 = e2eStress312 pkgs;
         e2e-stress-py314 = e2eStress314 pkgs;
         e2e-stress-py315 = e2eStress315 pkgs;
+        e2e-stress-trivial = e2eStressTrivial pkgs;
+        e2e-stress-trivial-py314 = e2eStressTrivial314 pkgs;
         skin = skin pkgs;
       });
 
@@ -110,6 +123,8 @@
         e2e-stress-py312 = { type = "app"; program = "${e2eStress312 pkgs}/bin/yok-e2e-stress-py312"; };
         e2e-stress-py314 = { type = "app"; program = "${e2eStress314 pkgs}/bin/yok-e2e-stress-py314"; };
         e2e-stress-py315 = { type = "app"; program = "${e2eStress315 pkgs}/bin/yok-e2e-stress-py315"; };
+        e2e-stress-trivial = { type = "app"; program = "${e2eStressTrivial pkgs}/bin/yok-e2e-stress-trivial"; };
+        e2e-stress-trivial-py314 = { type = "app"; program = "${e2eStressTrivial314 pkgs}/bin/yok-e2e-stress-trivial-py314"; };
       });
 
       # Build the add-on for a specific Kodi variant (kodi-gbm, kodi-wayland, ...):

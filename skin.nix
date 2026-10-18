@@ -5,10 +5,10 @@
 # Used as: pkgs.kodi.packages.callPackage ./skin.nix { }
 # `stressWidgets` swaps in 15 widgets (one per system) for the Python crash
 # experiment in docs/wiki/Home-rows; never use it for real.
-{ buildKodiAddon, kodi, stressWidgets ? false }:
+{ buildKodiAddon, kodi, stressWidgets ? false, stressPlugin ? "plugin.video.myyoutubers" }:
 
 buildKodiAddon {
-  pname = "skin-estuary-rows${if stressWidgets then "-stress" else ""}";
+  pname = "skin-estuary-rows${if stressWidgets then "-stress" else ""}${if stressPlugin != "plugin.video.myyoutubers" then "-trivial" else ""}";
   version = "4.0.0.1";
   namespace = "skin.estuary-rows";
 
@@ -21,5 +21,8 @@ buildKodiAddon {
     chmod -R u+w $dir
     patch -d $dir -p1 < ${./skin/estuary-rows.patch}
     cp ${if stressWidgets then ./skin/Includes_Rows_stress.xml else ./skin/Includes_Rows.xml} $dir/xml/Includes_Rows.xml
+    chmod u+w $dir/xml/Includes_Rows.xml
+    # Experiment: point the widgets at another plugin (the trivial one).
+    substituteInPlace $dir/xml/Includes_Rows.xml --replace-quiet plugin.video.myyoutubers ${stressPlugin}
   '';
 }
