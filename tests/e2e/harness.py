@@ -153,7 +153,11 @@ class Kodi:
         return path
 
     def make_tvshow_source(self, path):
-        """Set `path` to content "TV shows", local information only.
+        self.make_sources({path: "tvshows"})
+
+    def make_sources(self, contents):
+        """Set each path in `contents` to its content type ("tvshows" or
+        "movies"), local information only.
 
         Kodi has no API for this; it is two columns of the video database's
         path table, so edit it while Kodi is stopped, then restart.
@@ -161,17 +165,18 @@ class Kodi:
         self.rpc("Application.Quit")
         self.kodi_proc.wait(30)
         self.procs.remove(self.kodi_proc)
-        path = path.rstrip("/") + "/"
         con = sqlite3.connect(self.video_db())
         try:
-            row = con.execute("SELECT idPath FROM path WHERE strPath=?", (path,)).fetchone()
-            if row:
-                con.execute("UPDATE path SET strContent='tvshows', strScraper='metadata.local' "
-                            "WHERE idPath=?", (row[0],))
-            else:
-                con.execute("INSERT INTO path (strPath, strContent, strScraper, scanRecursive, "
-                            "useFolderNames, noUpdate, exclude) VALUES (?, 'tvshows', "
-                            "'metadata.local', 0, 0, 0, 0)", (path,))
+            for path, content in contents.items():
+                path = path.rstrip("/") + "/"
+                row = con.execute("SELECT idPath FROM path WHERE strPath=?", (path,)).fetchone()
+                if row:
+                    con.execute("UPDATE path SET strContent=?, strScraper='metadata.local' "
+                                "WHERE idPath=?", (content, row[0]))
+                else:
+                    con.execute("INSERT INTO path (strPath, strContent, strScraper, scanRecursive, "
+                                "useFolderNames, noUpdate, exclude) VALUES (?, ?, "
+                                "'metadata.local', 0, 0, 0, 0)", (path, content))
             con.commit()
         finally:
             con.close()

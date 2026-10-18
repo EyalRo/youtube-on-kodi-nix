@@ -13,6 +13,7 @@ pages record *why* things are the way they are.
 | [Channels as TV shows](Channels-as-TV-shows) | Research / design |
 | [Unified "next up" view](Unified-next-up-view) | Research / design |
 | [Games](Games) | Scanner implemented; launch verified in e2e |
+| [Home rows](Home-rows) | Implemented; verified in e2e |
 | [Channel management and subscriptions](Channel-management-and-subscriptions) | Research / design |
 
 Conventions used in these pages: **Verified** means reproduced here with

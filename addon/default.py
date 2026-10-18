@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.join(ADDON_PATH, "resources", "lib"))
 import kanyt
 import libexport
 import gamescan
+import rows
 
 
 def get_setting_int(name, default):
@@ -316,6 +317,8 @@ def refresh_channel_cache(query):
 
 def list_channels():
     channels = kanyt.read_channels_conf(CONF_FILE)
+    li = xbmcgui.ListItem(label="[B]Home rows[/B]")
+    add_dir(li, build_url({"mode": "rows"}))
     for c in channels:
         display = c["name"] or c["query"]
         li = xbmcgui.ListItem(label=display)
@@ -1214,6 +1217,69 @@ def play_game(game_id):
     xbmc.executebuiltin('PlayMedia("{}")'.format(game["path"]))
 
 
+# --- Rows ---
+
+def jsonrpc(method, **params):
+    reply = json.loads(
+        xbmc.executeJSONRPC(
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+        )
+    )
+    if "error" in reply:
+        log("ERROR", "{} failed: {}".format(method, reply["error"]))
+        return {}
+    return reply.get("result", {})
+
+
+def load_catalog():
+    """Movies, TV shows/channels and games as one list of row items."""
+    movies = jsonrpc(
+        "VideoLibrary.GetMovies", properties=["title", "premiered", "year", "art", "file"]
+    ).get("movies", [])
+    shows = jsonrpc(
+        "VideoLibrary.GetTVShows", properties=["title", "tag", "art", "watchedepisodes"]
+    ).get("tvshows", [])
+    episodes = jsonrpc(
+        "VideoLibrary.GetEpisodes", properties=["tvshowid", "firstaired", "playcount"]
+    ).get("episodes", [])
+    games = load_games()
+    items = (
+        rows.movie_items(movies)
+        + rows.show_items(shows, episodes)
+        + rows.game_items(games, lambda g: build_url({"mode": "game", "id": g["id"]}))
+    )
+    log("DEBUG", "catalog: {} movies, {} shows, {} episodes, {} games".format(
+        len(movies), len(shows), len(episodes), len(games)))
+    return items
+
+
+def list_rows():
+    for rid, label, count in rows.list_rows(load_catalog()):
+        li = xbmcgui.ListItem(label="{} ({})".format(label, count))
+        li.setInfo("video", {"title": label, "plot": label})
+        add_dir(li, build_url({"mode": "row", "id": rid}))
+    xbmcplugin.endOfDirectory(HANDLE)
+
+
+def list_row(row_id):
+    items = rows.build_row(row_id, load_catalog())
+    if items is None:
+        log("ERROR", "unknown row {!r}".format(row_id))
+        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+        return
+    for it in items:
+        li = xbmcgui.ListItem(label=it["title"], label2=it["label2"])
+        li.setInfo("video", {"title": it["title"], "plot": it["label2"], "premiered": it["date"] or ""})
+        li.setArt(it["art"])
+        if it["playable"]:
+            li.setProperty("IsPlayable", "true")
+        add_dir(li, it["url"], it["is_folder"])
+    xbmcplugin.setContent(HANDLE, "videos")
+    # Keep our order; skins would otherwise re-sort by label.
+    xbmcplugin.addSortMethod(HANDLE, xbmcplugin.SORT_METHOD_UNSORTED)
+    xbmcplugin.endOfDirectory(HANDLE)
+
+
 # --- Router ---
 
 def router(paramstring):
@@ -1291,6 +1357,10 @@ def router(paramstring):
     elif mode == "export_library":
         export_library()
         xbmc.executebuiltin('UpdateLibrary(video,"{}")'.format(library_dir()))
+    elif mode == "rows":
+        list_rows()
+    elif mode == "row":
+        list_row(params.get("id", ""))
     elif mode == "scan_games":
         n = len(scan_games())
         xbmcgui.Dialog().notification("Youtube On Kodi", "{} games found".format(n))

@@ -16,8 +16,8 @@ RESOLVED = []
 
 
 class _ListItem:
-    def __init__(self, label="", path=""):
-        self.label, self.path, self.props, self.menu = label, path, {}, []
+    def __init__(self, label="", label2="", path=""):
+        self.label, self.label2, self.path, self.props, self.menu = label, label2, path, {}, []
 
     def setInfo(self, *a): pass
     def setArt(self, *a): pass
@@ -114,6 +114,36 @@ class AddonTest(unittest.TestCase):
         default.router("?mode=game&id=" + games[0]["id"])
         default.xbmc.executebuiltin.assert_called_with('PlayMedia("{}")'.format(rom))
         self.assertGreater(default.load_games()[0]["last_played"], 0)
+
+    def test_row_directory_lists_mixed_items_newest_first(self):
+        replies = {
+            "VideoLibrary.GetMovies": {"movies": [
+                {"movieid": 1, "title": "Heat", "year": 1995, "file": "/m/heat.mkv"}]},
+            "VideoLibrary.GetTVShows": {"tvshows": [
+                {"tvshowid": 5, "title": "Chan", "tag": ["YouTube"], "watchedepisodes": 0}]},
+            "VideoLibrary.GetEpisodes": {"episodes": [
+                {"tvshowid": 5, "firstaired": "2024-06-02", "playcount": 0}]},
+        }
+
+        def fake_rpc(req):
+            import json
+            return json.dumps({"jsonrpc": "2.0", "id": 1, "result": replies[json.loads(req)["method"]]})
+
+        sys.argv = ["plugin://plugin.video.myyoutubers/", "7", ""]
+        sys.modules.pop("default", None)
+        sys.path.insert(0, ADDON)
+        default = importlib.import_module("default")
+        default.xbmc.executeJSONRPC.side_effect = fake_rpc
+        default.xbmcplugin.addDirectoryItem.reset_mock()
+        default.router("?mode=row&id=everything")
+        added = [c[0] for c in default.xbmcplugin.addDirectoryItem.call_args_list]
+        self.assertEqual([(a[2].label, a[1], a[3]) for a in added],
+                         [("Chan", "videodb://tvshows/titles/5/", True), ("Heat", "/m/heat.mkv", False)])
+        self.assertEqual(added[1][2].props["IsPlayable"], "true")
+        default.xbmcplugin.addDirectoryItem.reset_mock()
+        default.router("?mode=rows")
+        labels = [c[0][2].label for c in default.xbmcplugin.addDirectoryItem.call_args_list]
+        self.assertEqual(labels, ["Everything (2)", "Movies (1)", "YouTube channels (1)"])
 
 
 if __name__ == "__main__":

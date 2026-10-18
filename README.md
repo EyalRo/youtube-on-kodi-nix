@@ -47,6 +47,16 @@ The add-on source lives in [`addon/`](addon), forked from upstream commit
    e.g. `kodiPackages.libretro-nestopia` plus
    `kodiPackages.controller-topology-project`) and records last-played.
 
+8. **Home rows (experimental).** "Home rows" in the add-on menu lists rows over
+   one catalog of movies, TV shows, YouTube channels and games: Everything,
+   Movies, TV shows, YouTube channels, Shows with unwatched episodes, Games and
+   one row per game system. Each item sorts by one date, newest first and
+   undated last: a movie's or game's release date, a show's or channel's newest
+   aired episode. Each row is a plugin directory
+   (`plugin://plugin.video.myyoutubers/?mode=row&id=everything`, ids
+   `everything`, `movies`, `tvshows`, `channels`, `unwatched`, `games`,
+   `games:<system>`) that any skin can use as a widget source.
+
 Kodi treats a local `.m3u8` file as a playlist rather than a stream, so the
 master playlists are served over loopback HTTP by a tiny systemd unit.
 
