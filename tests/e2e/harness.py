@@ -198,12 +198,19 @@ class Kodi:
         except TimeoutError as e:
             raise TimeoutError("%s\n--- kodi.log tail ---\n%s\n--- kodi.out tail ---\n%s" % (
                 e, "\n".join(self.log().splitlines()[-25:]), self.out_tail())) from None
-        self.rpc("Addons.SetAddonEnabled", addonid=ADDON_ID, enabled=True)
-        self.rpc("Addons.SetAddonEnabled", addonid="inputstream.adaptive", enabled=True)
-        if os.environ.get("YOK_TRIVIAL_ADDON"):
-            self.rpc("Addons.SetAddonEnabled", addonid=TRIVIAL_ID, enabled=True)
-        if self.skin:  # not a system add-on, so disabled until enabled
-            self.rpc("Addons.SetAddonEnabled", addonid=SKIN_ID, enabled=True)
+        try:
+            self.rpc("Addons.SetAddonEnabled", addonid=ADDON_ID, enabled=True)
+            self.rpc("Addons.SetAddonEnabled", addonid="inputstream.adaptive", enabled=True)
+            if os.environ.get("YOK_TRIVIAL_ADDON"):
+                self.rpc("Addons.SetAddonEnabled", addonid=TRIVIAL_ID, enabled=True)
+            if self.skin:  # not a system add-on, so disabled until enabled
+                self.rpc("Addons.SetAddonEnabled", addonid=SKIN_ID, enabled=True)
+        except OSError as e:  # connection reset/refused: Kodi died after it started answering
+            time.sleep(2)
+            if self.kodi_proc.poll() is not None:
+                raise KodiDied("Kodi exited with status %s right after starting (%s); crash logs: %s"
+                               % (self.kodi_proc.poll(), e, self.crash_logs())) from None
+            raise
 
     def out_tail(self, lines=15):
         try:
