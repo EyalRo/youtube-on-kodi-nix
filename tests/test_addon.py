@@ -29,7 +29,7 @@ class _ListItem:
 
 def _stub_kodi(profile):
     addon = mock.Mock()
-    addon.getAddonInfo.side_effect = lambda k: {"path": ADDON, "profile": profile}[k]
+    addon.getAddonInfo.side_effect = lambda k: {"path": ADDON, "profile": profile, "id": "plugin.video.myyoutubers"}[k]
     addon.getSetting.return_value = ""
     mods = {
         "xbmc": mock.MagicMock(),
@@ -95,6 +95,25 @@ class AddonTest(unittest.TestCase):
         self.assertEqual(
             labels, ["Play from start", "Download", "Add to playlist", "Remove from playlist"]
         )
+
+    def test_games_scan_and_launch_record_last_played(self):
+        roms = os.path.join(self.tmp, "roms")
+        os.makedirs(os.path.join(roms, "NES"))
+        rom = os.path.join(roms, "NES", "Contra (USA).nes")
+        open(rom, "w").close()
+        with open(os.path.join(roms, "NES", "Contra (USA).json"), "w") as f:
+            f.write('{"released": "1988-02-09"}')
+        sys.argv = ["plugin://plugin.video.myyoutubers/", "7", ""]
+        sys.modules.pop("default", None)
+        sys.path.insert(0, ADDON)
+        default = importlib.import_module("default")
+        default.ADDON.getSetting.side_effect = lambda k: roms if k == "games_dir" else ""
+        games = default.scan_games()
+        self.assertEqual([(g["title"], g["system"], g["released"]) for g in games],
+                         [("Contra", "nes", "1988-02-09")])
+        default.router("?mode=game&id=" + games[0]["id"])
+        default.xbmc.executebuiltin.assert_called_with('PlayMedia("{}")'.format(rom))
+        self.assertGreater(default.load_games()[0]["last_played"], 0)
 
 
 if __name__ == "__main__":

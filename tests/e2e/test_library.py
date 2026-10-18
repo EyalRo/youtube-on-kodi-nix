@@ -39,6 +39,14 @@ def seed_addon_profile():
 
 
 def setUpModule():
+    try:
+        _setup()
+    except BaseException:
+        tearDownModule()  # don't leave Kodi holding the RPC port
+        raise
+
+
+def _setup():
     global kodi, workdir, library
     workdir = tempfile.mkdtemp(prefix="yok-e2e-lib-")
     library = os.path.join(workdir, "library")
@@ -61,6 +69,7 @@ def setUpModule():
 def tearDownModule():
     if kodi:
         kodi.stop()
+    harness.stop_servers()
     if workdir and not os.environ.get("YOK_KEEP"):
         shutil.rmtree(workdir, ignore_errors=True)
 

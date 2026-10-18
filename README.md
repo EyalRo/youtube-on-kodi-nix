@@ -37,6 +37,16 @@ The add-on source lives in [`addon/`](addon), forked from upstream commit
    deleted, so watched state survives. This is the data layer for the planned
    home-screen rows.
 
+7. **Games catalog (experimental).** Set the ROM folder in the add-on settings
+   (one subfolder per system: `NES/`, `Genesis/`, ...) and run "Scan games
+   folder". Games are catalogued in `games.json` with their system (folder
+   name first, then file extension) and a release date from a `Game.json` /
+   `Game.nfo` sidecar or an optional libretro-database `.dat` directory
+   (`resources/releases/`); games with no date are logged as `WARN`. Launching
+   plays the ROM in Kodi's RetroPlayer (install the matching libretro core,
+   e.g. `kodiPackages.libretro-nestopia` plus
+   `kodiPackages.controller-topology-project`) and records last-played.
+
 Kodi treats a local `.m3u8` file as a playlist rather than a stream, so the
 master playlists are served over loopback HTTP by a tiny systemd unit.
 

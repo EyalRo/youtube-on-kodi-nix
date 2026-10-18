@@ -30,7 +30,7 @@
         maxHeight = 1080;
       };
 
-      kodiWithIsa = pkgs: pkgs.kodi.withPackages (k: [ k.inputstream-adaptive ]);
+      kodiWithIsa = pkgs: pkgs.kodi.withPackages (k: [ k.inputstream-adaptive k.libretro-nestopia k.controller-topology-project ]);
 
       # Real Kodi (headless, software GL) plays the packaged add-on.
       e2e = pkgs: pkgs.writeShellApplication {

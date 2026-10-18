@@ -65,10 +65,22 @@ class Quiet(SimpleHTTPRequestHandler):
         pass
 
 
+_servers = []
+
+
 def serve(directory, port):
     srv = ThreadingHTTPServer(("127.0.0.1", port), partial(Quiet, directory=directory))
     Thread(target=srv.serve_forever, daemon=True).start()
+    _servers.append(srv)
     return srv
+
+
+def stop_servers():
+    """Close every server started with serve(), freeing its port for the next module."""
+    while _servers:
+        srv = _servers.pop()
+        srv.shutdown()
+        srv.server_close()
 
 
 class Kodi:

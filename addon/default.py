@@ -25,6 +25,8 @@ ERROR_LOG = os.path.join(PROFILE, "error.log")
 DOWNLOAD_DIR = os.path.join(PROFILE, "downloads")
 PLAYLISTS_FILE = os.path.join(PROFILE, "playlists.json")
 HISTORY_FILE = os.path.join(PROFILE, "history.json")
+GAMES_FILE = os.path.join(PROFILE, "games.json")
+RELEASES_DIR = os.path.join(ADDON_PATH, "resources", "releases")
 DEFAULT_CONF = os.path.join(ADDON_PATH, "resources", "channels.conf")
 CLEANUP_FILE = os.path.join(PROFILE, "cleanup.json")
 
@@ -32,6 +34,7 @@ sys.path.insert(0, os.path.join(ADDON_PATH, "resources", "lib"))
 
 import kanyt
 import libexport
+import gamescan
 
 
 def get_setting_int(name, default):
@@ -338,6 +341,8 @@ def list_channels():
     add_dir(li, build_url({"mode": "history"}))
     li = xbmcgui.ListItem(label="[B]Export channels to library[/B]")
     add_dir(li, build_url({"mode": "export_library"}), isfolder=False)
+    li = xbmcgui.ListItem(label="[B]Scan games folder[/B]")
+    add_dir(li, build_url({"mode": "scan_games"}), isfolder=False)
     li = xbmcgui.ListItem(label="[B]Refresh all caches[/B]")
     add_dir(li, build_url({"mode": "refresh_all"}))
     xbmcplugin.endOfDirectory(HANDLE)
@@ -1170,6 +1175,45 @@ def export_library():
     return root
 
 
+# --- Games ---
+
+def load_games():
+    try:
+        with open(GAMES_FILE) as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except (OSError, ValueError):
+        pass
+    return []
+
+
+def scan_games():
+    """Rescan the ROM folder into games.json; returns the catalog."""
+    root = ADDON.getSetting("games_dir")
+    if not root or not os.path.isdir(root):
+        log("ERROR", "games folder {!r} is not set or does not exist".format(root))
+        return []
+    games = gamescan.scan(
+        root, load_games(), gamescan.load_release_db(RELEASES_DIR), log
+    )
+    kanyt.atomic_write(GAMES_FILE, games)
+    return games
+
+
+def play_game(game_id):
+    games = load_games()
+    game = next((g for g in games if g["id"] == game_id), None)
+    if not game or not os.path.exists(game["path"]):
+        log("ERROR", "game {!r} not found; rescan the games folder".format(game_id))
+        xbmcgui.Dialog().notification("Youtube On Kodi", "Game not found", xbmcgui.NOTIFICATION_ERROR)
+        return
+    game["last_played"] = time.time()
+    kanyt.atomic_write(GAMES_FILE, games)
+    log("INFO", "launching {} ({})".format(game["title"], game["system"]))
+    xbmc.executebuiltin('PlayMedia("{}")'.format(game["path"]))
+
+
 # --- Router ---
 
 def router(paramstring):
@@ -1247,6 +1291,11 @@ def router(paramstring):
     elif mode == "export_library":
         export_library()
         xbmc.executebuiltin('UpdateLibrary(video,"{}")'.format(library_dir()))
+    elif mode == "scan_games":
+        n = len(scan_games())
+        xbmcgui.Dialog().notification("Youtube On Kodi", "{} games found".format(n))
+    elif mode == "game":
+        play_game(params.get("id", ""))
     elif mode == "refresh_all":
         refresh_all_caches()
     elif mode == "refresh_channel":

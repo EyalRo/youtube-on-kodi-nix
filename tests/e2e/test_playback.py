@@ -29,6 +29,7 @@ def setUpModule():
 def tearDownModule():
     if kodi:
         kodi.stop()
+    harness.stop_servers()
     if workdir and not os.environ.get("YOK_KEEP"):
         shutil.rmtree(workdir, ignore_errors=True)
 

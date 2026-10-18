@@ -9,4 +9,5 @@
     <setting id="search_max_files" type="slider" label="Max search cache files (0 = unlimited)" range="0,500" option="int" default="50" />
     <setting id="library_dir" type="text" label="Library folder for exported channels (empty = add-on profile)" default="" />
     <setting id="library_max_videos" type="slider" label="Videos exported per channel" range="5,500" option="int" default="50" />
+    <setting id="games_dir" type="text" label="ROM folder (one subfolder per system, e.g. NES, Genesis)" default="" />
 </settings>
