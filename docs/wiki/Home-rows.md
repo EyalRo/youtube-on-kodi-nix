@@ -61,13 +61,42 @@ Findings worth remembering:
 
 Kodi starts every home widget's plugin script at the same moment. With 15
 widgets (one per game system) Kodi 21.3 **segfaulted** during startup inside its
-embedded Python (`_PyThreadState_MustExit`, libpython 3.13); runs with 6 or 7
-widgets never did. So the skin has 7: the six rows plus one "Games by system"
-card list (`mode=systems`), whose cards open the per-system rows
-(`mode=row&id=games:<system>`). `test_skin_stays_under_the_widget_limit` caps
-the count at 8. This probably also explains intermittent e2e failures seen
-earlier (empty widgets, dropped `ExecuteAddon` calls) while widgets were being
-added.
+embedded Python (`_PyThreadState_MustExit`, libpython 3.13). So the skin has 7
+widgets: the six rows plus one "Games by system" card list (`mode=systems`),
+whose cards open the per-system rows (`mode=row&id=games:<system>`).
+`test_skin_stays_under_the_widget_limit` caps the count at 8.
+
+#### Does a different Python help? (measured, 2026-10-18)
+
+Stress test: restart Kodi with the 15-widget skin and count startups that
+crash or hang (`nix run .#e2e-stress*`, idle 4-core machine, Kodi 21.3, real
+add-on unless noted). A harsh test, not a real-world rate.
+
+| Kodi built against | Bad startups | 95% CI | Failure mode |
+|---|---|---|---|
+| Python 3.12 | 9 / 90 (10%) | 5-18% | all **hang on quit** (deadlock), no segfault |
+| Python 3.13 (nixpkgs default) | 23 / 90 (26%) | 18-35% | all segfault |
+| Python 3.14 | 18 / 30 (60%) | 42-75% | segfault |
+| Python 3.15.0 | n/a | | **Kodi 21.3 does not compile** (fails at ~96%) |
+| 3.13, trivial plugin | 12 / 30 (40%) | 25-58% | segfault |
+
+- 3.12 vs 3.13: p = 0.01. 3.13 vs 3.14: p = 0.001. 3.13 real vs trivial:
+  p = 0.16 (not significant).
+- **Newer is worse**, and 3.15.0 is unusable with Kodi 21: the interpreter's C
+  API moved on and Kodi's embedding code did not.
+- **3.12 is the best of the four** (about 2.5x fewer bad startups) but it
+  trades segfaults for deadlocks: every 3.12 hang came with a run where only 3
+  of 15 widget scripts ever started.
+- **The trivial plugin (imports nothing, returns an empty list) was not better**
+  (40% vs 26%, not significantly different). So the crash is about starting
+  many scripts at once, not about what they do; slimming the script is not a fix.
+  Only avoiding in-process scripts (a daemon plus native Kodi paths) removes it.
+- Not measured: the 3.14 trivial variant (its setup hung on quit), and the
+  rate for the shipped 7-widget skin.
+- Reproduce: `nix build .#e2e-stress-py312` etc.; the 3.14 and 3.15 variants use
+  an unstable nixpkgs tarball (`nixpkgs-unstable` input) and the 3.15 set needs
+  build-time tests disabled. 3.12 needs `kodi.override { python3Packages =
+  python312Packages; }`, which compiles Kodi (about an hour, not in the cache).
 
 ### Catalog cache
 
