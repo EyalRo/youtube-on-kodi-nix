@@ -67,3 +67,8 @@ start" ignoring history.
   group and kills the group, or an orphaned Kodi keeps the JSON-RPC port.
 - `YOK_SCREENSHOTS=<dir>` saves screenshots (`xwd` + ffmpeg); `YOK_KEEP=1`
   keeps the temp Kodi home, `kodi.log` and any crash log.
+- Kodi 21.3 on Python 3.13 segfaults in a small share of startups, not only
+  with many widgets (CI saw exit status 139 in `test_library`'s first launch).
+  The harness raises `KodiDied` at once and retries a startup that dies up to
+  twice, printing a WARNING, so tests about our code are not failed by that
+  Kodi bug. `test_stress` sets `startup_retries=0` because it counts crashes.

@@ -36,7 +36,7 @@ def setUpModule():
 def _setup():
     global kodi, workdir
     workdir = tempfile.mkdtemp(prefix="yok-e2e-stress-")
-    kodi = harness.Kodi(workdir, skin=True)
+    kodi = harness.Kodi(workdir, skin=True, startup_retries=0)  # count crashes, don't hide them
     kodi.start()
     kodi.restart_kodi()  # the skin only becomes active on the next launch
 

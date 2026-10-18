@@ -111,9 +111,13 @@ def stop_servers():
 
 
 class Kodi:
-    def __init__(self, workdir, skin=False):
+    def __init__(self, workdir, skin=False, startup_retries=2):
         self.dir = workdir
         self.skin = skin
+        # Kodi 21 on Python 3.13 segfaults in a few percent of startups (see
+        # docs/wiki/Home-rows). Tests about our code retry a startup that dies;
+        # the stress test passes 0 because it is counting those crashes.
+        self.startup_retries = startup_retries
         self.home = os.path.join(workdir, "home")
         self.procs = []
         self.state = os.path.join(workdir, "state")
@@ -164,6 +168,19 @@ class Kodi:
         self._launch_kodi()
 
     def _launch_kodi(self):
+        for attempt in range(self.startup_retries + 1):
+            try:
+                return self._launch_kodi_once()
+            except KodiDied as e:
+                if attempt == self.startup_retries:
+                    raise
+                print("WARNING: Kodi died during startup (%s); retrying (%d/%d)"
+                      % (e, attempt + 1, self.startup_retries), flush=True)
+                self.procs.remove(self.kodi_proc)
+                self.kodi_proc.wait()
+                self.crash_logs_seen = getattr(self, "crash_logs_seen", 0) + 1
+
+    def _launch_kodi_once(self):
         # A Kodi that is still shutting down keeps the JSON-RPC port; a new Kodi
         # cannot bind it and then never answers.
         if not wait_port_free(RPC_PORT, 30):
