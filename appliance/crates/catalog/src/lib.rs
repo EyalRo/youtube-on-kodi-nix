@@ -10,5 +10,7 @@ mod systems;
 
 pub use date::parse_release;
 pub use item::{DateSource, Episode, Item, Kind, MediaEntry};
-pub use rows::{RowInfo, build_row, list_rows, sort_newest, FIXED_ROW_IDS};
-pub use systems::{SYSTEMS, System, display_title, system_by_id, system_for, title_key};
+pub use rows::{FIXED_ROW_IDS, RowInfo, build_row, list_rows, sort_newest};
+pub use systems::{
+    SYSTEMS, System, display_title, system_by_id, system_for, system_for_folder, title_key,
+};
