@@ -1,0 +1,18 @@
+[package]
+name = "store"
+description = "SQLite store for the media appliance: catalog, episodes and watch state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+catalog = { path = "../catalog" }
+scanner = { path = "../scanner" }
+chrono.workspace = true
+rusqlite.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

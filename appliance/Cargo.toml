@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/catalog", "crates/scanner"]
+members = ["crates/catalog", "crates/scanner", "crates/store"]
 
 [workspace.package]
 version = "0.1.0"
@@ -17,3 +17,5 @@ tracing = "0.1"
 sha2 = "0.10"
 walkdir = "2"
 tempfile = "3"
+thiserror = "2"
+rusqlite = { version = "0.37", features = ["bundled"] }
