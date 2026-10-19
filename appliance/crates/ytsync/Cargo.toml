@@ -1,0 +1,18 @@
+[package]
+name = "ytsync"
+description = "Timer-driven job: download new videos of followed YouTube channels next to the rest of the library"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+scanner = { path = "../scanner" }
+catalog = { path = "../catalog" }

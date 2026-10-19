@@ -1167,6 +1167,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ytsync"
+version = "0.1.0"
+dependencies = [
+ "catalog",
+ "scanner",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
