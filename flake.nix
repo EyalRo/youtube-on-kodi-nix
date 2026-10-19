@@ -130,6 +130,7 @@
         e2e-stress-trivial = e2eStressTrivial pkgs;
         e2e-stress-trivial-py314 = e2eStressTrivial314 pkgs;
         skin = skin pkgs;
+        appliance = pkgs.callPackage ./appliance/package.nix { };
       });
 
       # nix run .#e2e
@@ -152,5 +153,9 @@
       lib.skinFor = kodiPackages: kodiPackages.callPackage ./skin.nix { };
 
       nixosModules.default = import ./module.nix;
+
+      # Media appliance back end (mediad + ytsync). Set `services.media-appliance.package`
+      # to `youtube-on-kodi.packages.<system>.appliance`.
+      nixosModules.appliance = import ./appliance/module.nix;
     };
 }

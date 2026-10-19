@@ -423,11 +423,16 @@ mod tests {
         let addr = l.local_addr().unwrap().to_string();
         let t = std::thread::spawn(move || {
             let (mut c, _) = l.accept().unwrap();
+            // Read the whole request head before answering, or the close resets the connection.
+            let mut got = Vec::new();
             let mut buf = [0u8; 512];
-            let n = c.read(&mut buf).unwrap();
+            while !got.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = c.read(&mut buf).unwrap();
+                got.extend_from_slice(&buf[..n]);
+            }
             c.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
                 .unwrap();
-            String::from_utf8_lossy(&buf[..n]).into_owned()
+            String::from_utf8_lossy(&got).into_owned()
         });
         notify_rescan(&addr).unwrap();
         assert!(t.join().unwrap().starts_with("POST /rescan HTTP/1.1"));

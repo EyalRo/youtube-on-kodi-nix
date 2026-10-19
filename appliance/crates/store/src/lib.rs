@@ -436,6 +436,36 @@ impl Store {
         self.save_progress(id, 0.0, 0.0)
     }
 
+    /// The id of the movie, game or episode stored at this exact path.
+    pub fn id_by_path(&self, path: &str) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id FROM entries WHERE path = ?1 AND kind IN ('movie','game')
+                 UNION ALL SELECT id FROM episodes WHERE path = ?1 LIMIT 1",
+                params![path],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Bring in watch state from elsewhere. Never overwrites state that already exists.
+    /// Returns whether anything was written.
+    pub fn import_state(
+        &mut self,
+        id: &str,
+        position: f64,
+        duration: f64,
+        watched: bool,
+        last_played: Option<i64>,
+    ) -> Result<bool, StoreError> {
+        let n = self.conn.execute(
+            "INSERT OR IGNORE INTO play_state (id, position, duration, watched, last_played) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, if watched { 0.0 } else { position.max(0.0) }, duration.max(0.0), watched as i64, last_played],
+        )?;
+        Ok(n > 0)
+    }
+
     pub fn count(&self) -> Result<usize, StoreError> {
         Ok(self
             .conn
@@ -667,6 +697,30 @@ mod tests {
         let p = s.play_info("g-1").unwrap().unwrap();
         assert_eq!((p.kind, p.system.as_deref()), ("game", Some("genesis")));
         assert_eq!(s.item("g-1").unwrap().unwrap().label2, "Genesis");
+    }
+
+    #[test]
+    fn import_state_fills_gaps_and_never_overwrites() {
+        let mut s = store();
+        assert_eq!(s.id_by_path("/media/m-1").unwrap().as_deref(), Some("m-1"));
+        assert_eq!(
+            s.id_by_path("/media/e-2.mkv").unwrap().as_deref(),
+            Some("e-2")
+        );
+        assert_eq!(
+            s.id_by_path("/media/s-1").unwrap(),
+            None,
+            "shows are not playable paths"
+        );
+        assert!(
+            s.import_state("m-1", 400.0, 1000.0, false, Some(5))
+                .unwrap()
+        );
+        assert_eq!(s.play_info("m-1").unwrap().unwrap().resume_position, 400.0);
+        assert!(!s.import_state("m-1", 10.0, 1000.0, true, None).unwrap());
+        assert_eq!(s.play_info("m-1").unwrap().unwrap().resume_position, 400.0);
+        assert!(s.import_state("e-1", 0.0, 0.0, true, None).unwrap());
+        assert_eq!(s.item("s-1").unwrap().unwrap().watched, 1);
     }
 
     #[test]

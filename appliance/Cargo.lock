@@ -416,6 +416,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "kodiimport"
+version = "0.1.0"
+dependencies = [
+ "catalog",
+ "chrono",
+ "rusqlite",
+ "scanner",
+ "store",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

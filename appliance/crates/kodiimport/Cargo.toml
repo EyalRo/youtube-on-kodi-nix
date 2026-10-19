@@ -1,0 +1,24 @@
+[package]
+name = "kodiimport"
+description = "One-time, read-only import of Kodi watch and resume state into the appliance store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "kodi-import"
+path = "src/main.rs"
+
+[dependencies]
+store = { path = "../store" }
+chrono.workspace = true
+rusqlite.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+catalog = { path = "../catalog" }
+scanner = { path = "../scanner" }
+tempfile.workspace = true
