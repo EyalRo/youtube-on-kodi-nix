@@ -1,0 +1,20 @@
+[package]
+name = "player"
+description = "Launch mpv or RetroArch for an item from mediad and report progress back"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "play"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
