@@ -1,2 +1,5 @@
 core
 __pycache__/
+
+# Rust build output
+appliance/target/
