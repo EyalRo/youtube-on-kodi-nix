@@ -48,6 +48,10 @@ pub struct Job {
 pub trait Fetch {
     /// Download into `job.work_dir`. Returns an error only if nothing usable can be assumed.
     fn fetch(&self, job: &Job) -> Result<(), String>;
+    /// Fetch the channel's own picture into `job.work_dir` as `channel.avatar_uncropped.jpg`.
+    fn fetch_poster(&self, _job: &Job) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// The real thing: yt-dlp as a child process.
@@ -91,6 +95,31 @@ pub fn ytdlp_args(cfg: &Config, job: &Job) -> Vec<String> {
     a
 }
 
+/// (It must not pass `--no-write-playlist-metafiles`: that also drops the playlist thumbnails.
+/// The playlist `.info.json` it writes is harmless: delivery has already run.)
+/// Metadata-only call: yt-dlp writes every channel image (avatar, banner, ...) named
+/// `channel.<kind>.jpg`; ytsync uses the avatar, which is square.
+pub fn poster_args(job: &Job) -> Vec<String> {
+    [
+        "--ignore-errors",
+        "--no-warnings",
+        "--skip-download",
+        "--playlist-items",
+        "0",
+        "--write-all-thumbnails",
+        "--convert-thumbnails",
+        "jpg",
+        "-o",
+    ]
+    .map(String::from)
+    .into_iter()
+    .chain([
+        format!("pl_thumbnail:{}", job.work_dir.join("channel").display()),
+        job.url.clone(),
+    ])
+    .collect()
+}
+
 impl Fetch for YtDlp<'_> {
     fn fetch(&self, job: &Job) -> Result<(), String> {
         let status = Command::new(&self.0.ytdlp)
@@ -98,6 +127,18 @@ impl Fetch for YtDlp<'_> {
             .status()
             .map_err(|e| format!("cannot run {}: {e}", self.0.ytdlp.display()))?;
         // yt-dlp exits 1 when any single video failed; what finished is still delivered.
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("yt-dlp exited with {status}"))
+        }
+    }
+
+    fn fetch_poster(&self, job: &Job) -> Result<(), String> {
+        let status = Command::new(&self.0.ytdlp)
+            .args(poster_args(job))
+            .status()
+            .map_err(|e| format!("cannot run {}: {e}", self.0.ytdlp.display()))?;
         if status.success() {
             Ok(())
         } else {
@@ -193,6 +234,21 @@ pub fn run(cfg: &Config, channels: &[Channel], fetcher: &dyn Fetch) -> Summary {
         };
         let fetched = fetcher.fetch(&job);
         let outcome = deliver::deliver(&work_dir, &youtube_root, channel.name.as_deref());
+        // The channel picture, once per channel folder: only when a folder has no poster yet.
+        let mut dirs: Vec<PathBuf> = outcome
+            .delivered
+            .iter()
+            .filter_map(|d| d.dest.parent().map(Path::to_path_buf))
+            .filter(|d| !d.join("poster.jpg").exists())
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        if !dirs.is_empty() {
+            match fetcher.fetch_poster(&job) {
+                Ok(()) => deliver::deliver_poster(&work_dir, &dirs),
+                Err(e) => tracing::warn!(channel = &channel.url, error = %e, "could not fetch the channel picture"),
+            }
+        }
         for d in &outcome.delivered {
             tracing::info!(channel = %channel.url, id = %d.id, dest = %d.dest.display(), "video delivered");
         }
@@ -417,6 +473,8 @@ mod tests {
         assert!(a.contains("--download-archive /s/archive.txt") && a.ends_with(" U"));
         assert!(a.contains("!is_live"));
         assert!(a.contains("--no-write-playlist-metafiles"));
+        let p = poster_args(&job).join(" ");
+        assert!(p.contains("--playlist-items 0") && p.contains("pl_thumbnail:/w/channel") && p.ends_with(" U"));
     }
 
     #[test]

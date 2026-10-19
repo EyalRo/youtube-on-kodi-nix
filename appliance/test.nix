@@ -10,9 +10,14 @@ let
       case "$1" in
         -o) out=$2; shift ;;
         --download-archive) archive=$2; shift ;;
+        --skip-download) poster=1 ;;
       esac
       shift
     done
+    if [ -n "$poster" ]; then
+      printf avatar > "''${out#pl_thumbnail:}.avatar_uncropped.jpg"
+      exit 0
+    fi
     stem="$(dirname "$out")/2024-06-02 - Fake Upload [abc123XYZ]"
     cat > "$stem.info.json" <<JSON
     {"id":"abc123XYZ","title":"Fake Upload","channel":"Test Channel","upload_date":"20240602"}
@@ -74,6 +79,7 @@ pkgs.testers.runNixOSTest {
         machine.succeed("test -f '/media/youtube/Test Channel/2024-06-02 - Fake Upload [abc123XYZ].mkv'")
         machine.succeed("test -f '/media/youtube/Test Channel/2024-06-02 - Fake Upload [abc123XYZ].info.json'")
         machine.succeed("grep -q abc123XYZ /persist/ytsync/archive.txt")
+        machine.succeed("test -f '/media/youtube/Test Channel/poster.jpg'")
 
     with subtest("mediad serves the video after ytsync's rescan request"):
         import json
@@ -83,6 +89,8 @@ pkgs.testers.runNixOSTest {
             assert len(items) == 1, items
             assert items[0]["kind"] == "channel" and items[0]["date"] == "2024-06-02", items
             assert items[0]["date_source"] == "info_json", items
+        assert json.loads(machine.succeed("curl -sf http://127.0.0.1:8730/rows/channels"))["items"][0]["art"].endswith("poster.jpg")
+        machine.succeed(f"curl -sf http://127.0.0.1:8730/items/{items[0]['id']}/art | grep -q avatar")
         detail = json.loads(machine.succeed(f"curl -sf http://127.0.0.1:8730/items/{items[0]['id']}"))
         eps = detail["episodes"]
         assert len(eps) == 1 and eps[0]["title"] == "Fake Upload" and eps[0]["aired"] == "2024-06-02", eps

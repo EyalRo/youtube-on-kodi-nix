@@ -51,6 +51,37 @@ pub fn safe_name(name: &str) -> String {
     }
 }
 
+/// Fields of yt-dlp's `.info.json` the appliance reads. The full file is ~10 MB of format lists.
+const KEEP: &[&str] = &[
+    "id", "title", "channel", "channel_id", "uploader", "upload_date", "timestamp", "duration",
+    "description", "webpage_url",
+];
+
+fn slim_info(info: &serde_json::Value) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    for k in KEEP {
+        if let Some(v) = info.get(*k) {
+            out.insert((*k).to_string(), v.clone());
+        }
+    }
+    serde_json::Value::Object(out)
+}
+
+/// Put the channel picture (fetched into `work` as `channel.avatar_uncropped.jpg`) in each
+/// channel folder that has no `poster.jpg` yet, where the scanner looks for artwork.
+pub fn deliver_poster(work: &Path, channel_dirs: &[PathBuf]) {
+    let avatar = work.join("channel.avatar_uncropped.jpg");
+    if !avatar.is_file() {
+        return;
+    }
+    for dir in channel_dirs {
+        let poster = dir.join("poster.jpg");
+        if !poster.exists() {
+            let _ = copy_atomic(&avatar, &poster);
+        }
+    }
+}
+
 fn copy_atomic(from: &Path, to: &Path) -> io::Result<()> {
     let mut part = to.as_os_str().to_owned();
     part.push(".part");
@@ -100,6 +131,8 @@ pub fn deliver(work: &Path, youtube_root: &Path, fallback_channel: Option<&str>)
             });
             continue;
         };
+        // The work directory is scratch: shrink the sidecar in place before it is copied.
+        let _ = fs::write(&info_path, slim_info(&info).to_string());
         let files: Vec<PathBuf> = fs::read_dir(work)
             .into_iter()
             .flatten()
@@ -181,6 +214,33 @@ mod tests {
 
     fn put(dir: &Path, name: &str, body: &str) {
         fs::write(dir.join(name), body).unwrap();
+    }
+
+    #[test]
+    fn slims_the_sidecar_and_delivers_the_poster() {
+        let work = tempfile::tempdir().unwrap();
+        let lib = tempfile::tempdir().unwrap();
+        put(
+            work.path(),
+            "2024-05-01 - Hi [abc].info.json",
+            r#"{"id":"abc","channel":"Chan","upload_date":"20240501","duration":61,"formats":[{"x":1}],"automatic_captions":{}}"#,
+        );
+        put(work.path(), "2024-05-01 - Hi [abc].mkv", "video");
+        put(work.path(), "channel.avatar_uncropped.jpg", "avatar");
+        let out = deliver(work.path(), lib.path(), None);
+        assert_eq!(out.delivered.len(), 1);
+        let text = fs::read_to_string(lib.path().join("Chan/2024-05-01 - Hi [abc].info.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["upload_date"], "20240501");
+        assert_eq!(v["duration"], 61);
+        assert!(v.get("formats").is_none() && v.get("automatic_captions").is_none());
+        let dirs = [lib.path().join("Chan")];
+        deliver_poster(work.path(), &dirs);
+        assert_eq!(fs::read_to_string(dirs[0].join("poster.jpg")).unwrap(), "avatar");
+        // An existing poster is never replaced.
+        fs::write(dirs[0].join("poster.jpg"), "mine").unwrap();
+        deliver_poster(work.path(), &dirs);
+        assert_eq!(fs::read_to_string(dirs[0].join("poster.jpg")).unwrap(), "mine");
     }
 
     #[test]
