@@ -59,6 +59,7 @@ pub fn ytdlp_args(cfg: &Config, job: &Job) -> Vec<String> {
         "--ignore-errors",
         "--no-warnings",
         "--write-info-json",
+        "--no-write-playlist-metafiles",
         "--write-thumbnail",
         "--convert-thumbnails",
         "jpg",
@@ -415,6 +416,7 @@ mod tests {
         );
         assert!(a.contains("--download-archive /s/archive.txt") && a.ends_with(" U"));
         assert!(a.contains("!is_live"));
+        assert!(a.contains("--no-write-playlist-metafiles"));
     }
 
     #[test]
