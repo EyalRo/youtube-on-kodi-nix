@@ -1,0 +1,22 @@
+[package]
+name = "mediad"
+description = "HTTP daemon for the media appliance: rows, items, playback info and watch state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+catalog = { path = "../catalog" }
+scanner = { path = "../scanner" }
+store = { path = "../store" }
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tower.workspace = true

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/catalog", "crates/scanner", "crates/store"]
+members = ["crates/catalog", "crates/scanner", "crates/store", "crates/mediad"]
 
 [workspace.package]
 version = "0.1.0"
@@ -19,3 +19,7 @@ walkdir = "2"
 tempfile = "3"
 thiserror = "2"
 rusqlite = { version = "0.37", features = ["bundled"] }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "fs"] }
+tower = { version = "0.5", features = ["util"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
