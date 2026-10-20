@@ -1,0 +1,27 @@
+# Separate workspace: Slint and its dependency tree stay out of the back end's build.
+[workspace]
+
+[package]
+name = "appliance-ui"
+description = "Living-room UI spike: poster rows from mediad, drawn straight to DRM/KMS with Slint"
+version = "0.1.0"
+edition = "2024"
+# Slint is GPL-3.0 (its royalty-free licence excludes embedded systems), so the UI binary is
+# GPL-3.0-only as a whole; the GPL-2.0-or-later back end crates are compatible with that.
+license = "GPL-3.0-only"
+rust-version = "1.88"
+
+[[bin]]
+name = "appliance-ui"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+slint = { version = "1.16", default-features = false, features = [
+    "std", "compat-1-2", "backend-linuxkms", "renderer-software", "image-default-formats",
+] }
+
+[build-dependencies]
+slint-build = "1.16"

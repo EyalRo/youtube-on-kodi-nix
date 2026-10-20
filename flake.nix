@@ -159,6 +159,15 @@
       nixosModules.appliance = import ./appliance/module.nix;
 
       # VM test: nix build .#checks.x86_64-linux.appliance -L
+      checks.x86_64-linux.appliance-ui =
+        let pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        in import ./appliance/test-ui.nix {
+          inherit pkgs;
+          appliance = pkgs.callPackage ./appliance/package.nix { };
+          ui = pkgs.callPackage ./appliance/ui/package.nix { };
+          module = ./appliance/module.nix;
+        };
+
       checks.x86_64-linux.appliance-handoff =
         let pkgs = nixpkgs.legacyPackages.x86_64-linux;
         in import ./appliance/test-handoff.nix {

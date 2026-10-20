@@ -1,0 +1,157 @@
+export struct TileData {
+    id: string,
+    title: string,
+    subtitle: string,
+    art: image,
+    has-art: bool,
+}
+
+export struct RowData {
+    label: string,
+    tiles: [TileData],
+}
+
+component Poster inherits Rectangle {
+    in property <TileData> data;
+    in property <bool> focused;
+    in property <int> index;
+    width: 200px;
+    height: 300px;
+    border-radius: 10px;
+    clip: true;
+    // A stable colour per position when there is no artwork.
+    background: Colors.hsv(mod(index * 47, 360), 0.45, 0.35);
+
+    if data.has-art: Image {
+        source: data.art;
+        width: parent.width;
+        height: parent.height;
+        image-fit: cover;
+    }
+    if !data.has-art: Text {
+        text: data.title;
+        wrap: word-wrap;
+        font-size: 24px;
+        color: white;
+        width: parent.width - 24px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component App inherits Window {
+    in property <[RowData]> rows;
+    in-out property <int> sel-row: 0;
+    in-out property <int> sel-col: 0;
+    callback activate(int, int);
+    callback quit();
+
+    background: #0e1318;
+    forward-focus: fs;
+    default-font-size: 22px;
+
+    property <length> tile-w: 224px;
+    property <length> row-h: 480px;
+
+    function clamp-col() {
+        sel-col = max(0, min(sel-col, rows[sel-row].tiles.length - 1));
+    }
+
+    fs := FocusScope {
+        key-pressed(e) => {
+            if (e.text == Key.RightArrow) {
+                if (sel-col < rows[sel-row].tiles.length - 1) { sel-col += 1; }
+            } else if (e.text == Key.LeftArrow) {
+                if (sel-col > 0) { sel-col -= 1; }
+            } else if (e.text == Key.DownArrow) {
+                if (sel-row < rows.length - 1) { sel-row += 1; clamp-col(); }
+            } else if (e.text == Key.UpArrow) {
+                if (sel-row > 0) { sel-row -= 1; clamp-col(); }
+            } else if (e.text == Key.Return) {
+                activate(sel-row, sel-col);
+            } else if (e.text == Key.Escape) {
+                quit();
+            } else {
+                return reject;
+            }
+            accept
+        }
+    }
+
+    // Rows scroll inside a clipped viewport so only the focused row and the ones below show.
+    Rectangle {
+        x: 0;
+        y: 40px;
+        width: root.width;
+        height: root.height - 40px;
+        clip: true;
+    Rectangle {
+        x: 0;
+        y: -sel-row * row-h;
+        animate y { duration: 180ms; easing: ease-out; }
+        for r[ri] in rows: Rectangle {
+            y: ri * row-h;
+            height: row-h;
+            width: root.width;
+
+            Text {
+                x: 60px;
+                y: 0px;
+                text: r.label;
+                font-size: 34px;
+                font-weight: 700;
+                color: ri == sel-row ? white : #7d8892;
+            }
+            Rectangle {
+                x: 60px - max(0, sel-col - 6) * tile-w * (ri == sel-row ? 1 : 0);
+                y: 60px;
+                height: row-h - 60px;
+                animate x { duration: 180ms; easing: ease-out; }
+                for t[ti] in r.tiles: Rectangle {
+                    x: ti * tile-w;
+                    y: 0px;
+                    width: tile-w;
+                    height: row-h - 60px;
+                    property <bool> focused: ri == sel-row && ti == sel-col;
+                    Poster {
+                        x: 12px;
+                        y: parent.focused ? 4px : 10px;
+                        data: t;
+                        index: ti;
+                        focused: parent.focused;
+                        animate y { duration: 120ms; }
+                    }
+                    Rectangle {
+                        x: 8px;
+                        y: 6px - (parent.focused ? 4px : 0px);
+                        width: 208px;
+                        height: 308px;
+                        border-radius: 14px;
+                        border-width: parent.focused ? 5px : 0px;
+                        border-color: #ffd54a;
+                    }
+                    Text {
+                        x: 12px;
+                        y: 318px;
+                        width: 200px;
+                        text: t.title;
+                        font-size: 22px;
+                        wrap: word-wrap;
+                        overflow: elide;
+                        max-height: 64px;
+                        color: parent.focused ? white : #aab4bd;
+                    }
+                    Text {
+                        x: 12px;
+                        y: 384px;
+                        width: 200px;
+                        text: t.subtitle;
+                        font-size: 18px;
+                        color: #6f7b86;
+                    }
+                }
+            }
+        }
+    }
+    }
+}
