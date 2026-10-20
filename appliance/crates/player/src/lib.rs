@@ -63,6 +63,8 @@ pub struct Config {
     /// The DRM connector and ALSA device of the one TV.
     pub drm_connector: String,
     pub audio_device: String,
+    /// Extra mpv options, placed after the defaults so they win (VM tests use `--vo=null`).
+    pub mpv_extra: Vec<String>,
     pub progress_interval: Duration,
 }
 
@@ -98,6 +100,7 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
     a.push(format!("--drm-connector={}", cfg.drm_connector));
     a.push(format!("--audio-device={}", cfg.audio_device));
     a.push(format!("--input-ipc-server={}", socket.display()));
+    a.extend(cfg.mpv_extra.iter().cloned());
     if play.resume_position > 0.0 {
         a.push(format!("--start={}", play.resume_position));
     }
@@ -237,6 +240,7 @@ mod tests {
             core_dir: "/cores".into(),
             drm_connector: "HDMI-A-1".into(),
             audio_device: "alsa/hdmi:CARD=PCH,DEV=0".into(),
+            mpv_extra: vec![],
             progress_interval: Duration::from_millis(0),
         }
     }
@@ -267,6 +271,15 @@ mod tests {
                 .join(" ")
                 .contains("--start")
         );
+    }
+
+    #[test]
+    fn mpv_extra_args_come_after_the_defaults() {
+        let mut c = cfg();
+        c.mpv_extra = vec!["--vo=null".into(), "--pause".into()];
+        let a = mpv_args(&c, &play("movie", 0.0), Path::new("/s"));
+        let pos = |s: &str| a.iter().position(|x| x == s).unwrap();
+        assert!(pos("--vo=null") > pos("--vo=gpu") && pos("--pause") < pos("--"));
     }
 
     #[test]
