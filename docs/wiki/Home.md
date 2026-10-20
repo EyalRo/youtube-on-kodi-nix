@@ -1,9 +1,7 @@
 # youtube-on-kodi-nix
 
 Notes and research for the NixOS packaging and the maintained fork of the
-Youtube-On-Kodi add-on. These pages are kept in the repository under `docs/wiki/` (the GitHub wiki
-could not be pushed to yet) and are written so they can be copied into it
-unchanged. Source of truth for the code is the repository; these
+Youtube-On-Kodi add-on. These pages live in the repository under `docs/wiki/` and are mirrored to the GitHub wiki. Source of truth for the code is the repository; these
 pages record *why* things are the way they are.
 
 | Page | Status |
@@ -14,6 +12,7 @@ pages record *why* things are the way they are.
 | [Unified "next up" view](Unified-next-up-view) | Research / design |
 | [Games](Games) | Scanner implemented; launch verified in e2e |
 | [Home rows](Home-rows) | Implemented; verified in e2e |
+| [Media appliance](Media-appliance) | Built and verified in VMs; NUC hardware gates open |
 | [Rust appliance feasibility](Rust-appliance-feasibility) | Research: what exists, what is missing |
 | [Channel management and subscriptions](Channel-management-and-subscriptions) | Research / design |
 
