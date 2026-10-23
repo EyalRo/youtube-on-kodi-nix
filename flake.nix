@@ -158,22 +158,8 @@
       # to `youtube-on-kodi.packages.<system>.appliance`.
       nixosModules.appliance = import ./appliance/module.nix;
 
-      # Hands-on QA VM: see appliance/qa-vm.nix
+      # Hands-on QA VM (the NAS library from the workstation's /mnt/media): see appliance/qa-vm.nix
       nixosConfigurations.appliance-qa = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
-        modules = [
-          ({ pkgs, ... }: import ./appliance/qa-vm.nix {
-            inherit pkgs;
-            appliance = pkgs.callPackage ./appliance/package.nix { };
-            ui = pkgs.callPackage ./appliance/ui/package.nix { };
-            module = ./appliance/module.nix;
-          })
-          "${nixpkgs}/nixos/modules/virtualisation/qemu-vm.nix"
-        ];
-      };
-
-      # Same VM, but /media is the NFS library from the workstation's /mnt/media.
-      nixosConfigurations.appliance-qa-nas = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
           ({ pkgs, ... }: import ./appliance/qa-vm.nix {

@@ -1,12 +1,13 @@
-# Interactive VM for hands-on QA of the appliance: mediad plus the UI on the VM's display,
-# with generated sample movies (Hebrew title included). Not a test; build and run it:
+# Interactive VM for hands-on QA of the appliance, set up like the real box: the NAS library
+# mounted at /media (movies, tv, roms read-only; youtube read-write for ytsync), mediad, the
+# YouTube sync and the UI on the VM's display. Not a test; build and run it:
 #   nix build .#nixosConfigurations.appliance-qa.config.system.build.vm
 #   ./result/bin/run-appliance-qa-vm
 # Click the QEMU window to give it the keyboard (arrows, Enter; ctrl+alt+g releases the grab).
 # Debug shell: ssh -p 2222 root@localhost (empty password).
-# With `nfsShare` (e.g. "192.168.0.100:/volume1/media") the library is that NFS export, mounted
-# read-only at /media, instead of the generated samples.
-{ pkgs, appliance, ui, module, nfsShare ? null }:
+# Following creators: `ytsync follow @handle ["Name"]`, `ytsync unfollow @handle`, `ytsync list`
+# (it edits the channels file); `systemctl start ytsync` downloads now instead of at 04:00.
+{ pkgs, appliance, ui, module, nfsShare }:
 
 {
   imports = [ module ];
@@ -36,41 +37,39 @@
   fonts.packages = [ pkgs.noto-fonts pkgs.dejavu_fonts ];
   environment.systemPackages = [ appliance ui pkgs.mpv pkgs.jq pkgs.sqlite pkgs.alsa-utils ];
 
-  services.media-appliance = { enable = true; package = appliance; rescanSeconds = 30;
-    # Downloads need a writable library, so only with the generated one (the NAS mount is read-only).
-    ytsync = pkgs.lib.mkIf (nfsShare == null) { enable = true; seedChannels = ./channels.default.conf; maxChannels = 1; };
+  services.media-appliance = {
+    enable = true;
+    package = appliance;
+    rescanSeconds = 30;
+    # A first live test: a couple of videos from one channel, not the whole list.
+    ytsync = { enable = true; seedChannels = ./channels.default.conf; maxChannels = 1; maxPerChannel = 2; };
   };
 
-  # The NAS, as the real box will see it. Read-only so QA cannot touch the library; automount +
+  # The export is mounted once, read-write, and /media is assembled from it: the library folders
+  # are bind-mounted read-only so nothing but ytsync (youtube/) can change the NAS. automount +
   # nofail so a missing NAS delays nothing at boot.
-  fileSystems."/media" = pkgs.lib.mkIf (nfsShare != null) {
-    device = nfsShare;
-    fsType = "nfs";
-    options = [ "ro" "vers=3" "nofail" "x-systemd.automount" "x-systemd.idle-timeout=600" "_netdev" ];
-  };
-  boot.supportedFilesystems = pkgs.lib.mkIf (nfsShare != null) [ "nfs" ];
-
-  systemd.services.qa-media = pkgs.lib.mkIf (nfsShare == null) {
-    description = "Generate QA sample library";
-    wantedBy = [ "multi-user.target" ];
-    before = [ "mediad.service" ];
-    path = [ pkgs.ffmpeg pkgs.coreutils ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
-    script = ''
-      mk() { # title color
-        d="/media/movies/$1 (2024)"
-        [ -d "$d" ] && return
-        mkdir -p "$d"
-        ffmpeg -loglevel error -f lavfi -i testsrc=size=640x360:rate=24 \
-          -f lavfi -i sine=frequency=440 -t 120 -c:v libx264 -preset ultrafast -c:a aac \
-          "$d/$1 (2024).mkv"
-        ffmpeg -loglevel error -f lavfi -i "color=c=$2:size=400x600" -frames:v 1 "$d/poster.jpg"
-      }
-      mk Alpha 0x3a6ea5; mk Bravo 0xa53a6e; mk "סרט בדיקה" 0x6ea53a
-      mk Delta 0xa5a53a; mk Echo 0x3aa5a5; mk Foxtrot 0xa56e3a
-      chmod -R a+rX /media
-    '';
-  };
+  boot.supportedFilesystems = [ "nfs" ];
+  fileSystems =
+    let bind = sub: ro: {
+      device = "/mnt/nas/${sub}";
+      options = [ "bind" ] ++ pkgs.lib.optional ro "ro" ++ [ "nofail" ];
+      depends = [ "/mnt/nas" ];
+    };
+    in {
+      "/mnt/nas" = {
+        device = nfsShare;
+        fsType = "nfs";
+        options = [ "vers=3" "nofail" "x-systemd.automount" "x-systemd.idle-timeout=600" "_netdev" ];
+      };
+      "/media/movies" = bind "movies" true;
+      "/media/tv" = bind "tv" true;
+      "/media/roms" = bind "roms" true;
+      "/media/youtube" = bind "youtube" false;
+    };
+  # The youtube folder is the one place the box writes; world-writable because the NAS maps ids.
+  systemd.tmpfiles.rules = [ "d /mnt/nas/youtube 0777 - - -" ];
+  # Start mediad only once the library is mounted, not on an empty /media.
+  systemd.services.mediad.unitConfig.RequiresMountsFor = [ "/media/movies" "/media/tv" "/media/roms" "/media/youtube" ];
 
   systemd.services.ui = {
     description = "Appliance UI session";
