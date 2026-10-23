@@ -3,3 +3,7 @@ __pycache__/
 
 # Rust build output
 appliance/target/
+
+# Hands-on QA VM outputs
+result-*
+*.qcow2
