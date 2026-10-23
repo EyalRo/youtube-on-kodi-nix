@@ -72,6 +72,12 @@ in
         description = "Followed channels, one per line: @handle, channel URL or UC... id, optional `| name`.";
       };
 
+      seedChannels = mkOption {
+        type = types.nullOr types.path;
+        default = null;
+        description = "Channels file to copy to channelsFile when that file does not exist yet (never overwrites an edited list).";
+      };
+
       stateDir = mkOption {
         type = types.path;
         default = "/persist/ytsync";
@@ -103,7 +109,9 @@ in
 
     systemd.tmpfiles.rules =
       [ "d ${cfg.stateDir} 0750 ${cfg.user} ${cfg.group} -" ]
-      ++ lib.optional ytsyncEnabled "d ${cfg.ytsync.stateDir} 0750 ${cfg.user} ${cfg.group} -";
+      ++ lib.optional ytsyncEnabled "d ${cfg.ytsync.stateDir} 0750 ${cfg.user} ${cfg.group} -"
+      ++ lib.optional (ytsyncEnabled && cfg.ytsync.seedChannels != null)
+        "C ${cfg.ytsync.channelsFile} 0640 ${cfg.user} ${cfg.group} - ${cfg.ytsync.seedChannels}";
 
     systemd.services.mediad = {
       description = "Media appliance library daemon";
