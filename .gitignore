@@ -5,5 +5,6 @@ __pycache__/
 appliance/target/
 
 # Hands-on QA VM outputs
+result
 result-*
 *.qcow2
