@@ -85,9 +85,68 @@ pub fn parse(text: &str) -> Parsed {
     out
 }
 
+/// The text with `entry` added (as `entry | name` when a name is given), or `None` when that
+/// channel is already followed. Rejects entries `parse` would skip.
+pub fn follow(text: &str, entry: &str, name: Option<&str>) -> Result<Option<String>, String> {
+    let entry = entry.trim();
+    let url = videos_url(entry)
+        .ok_or_else(|| format!("{entry:?} is not a @handle, channel URL or UC... id"))?;
+    if parse(text).channels.iter().any(|c| c.url.eq_ignore_ascii_case(&url)) {
+        return Ok(None);
+    }
+    let mut out = text.to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    match name.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(n) => out.push_str(&format!("{entry} | {n}\n")),
+        None => out.push_str(&format!("{entry}\n")),
+    }
+    Ok(Some(out))
+}
+
+/// The text without the channel `what` names (a handle, URL or id, or the display name,
+/// case-insensitive), or `None` when nothing matched. Comments and other lines are kept.
+pub fn unfollow(text: &str, what: &str) -> Option<String> {
+    let what = what.trim();
+    let want = videos_url(what).map(|u| u.to_lowercase());
+    let mut hit = false;
+    let kept: Vec<&str> = text
+        .lines()
+        .filter(|raw| {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return true;
+            }
+            let (query, name) = match line.split_once('|') {
+                Some((q, n)) => (q.trim(), n.trim()),
+                None => (line, ""),
+            };
+            let same_channel = want.is_some() && videos_url(query).map(|u| u.to_lowercase()) == want;
+            let same_name = !name.is_empty() && name.eq_ignore_ascii_case(what);
+            let matched = same_channel || same_name;
+            hit |= matched;
+            !matched
+        })
+        .collect();
+    hit.then(|| kept.join("\n") + "\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn follow_adds_once_and_unfollow_removes_by_handle_or_name() {
+        let text = "# mine\n@Foo | Foo Channel\n";
+        assert_eq!(follow(text, "@foo", None), Ok(None));
+        let added = follow(text, "@Bar", Some("The Bar")).unwrap().unwrap();
+        assert_eq!(added, "# mine\n@Foo | Foo Channel\n@Bar | The Bar\n");
+        assert!(follow(text, "Foo Channel", None).is_err());
+        assert_eq!(unfollow(&added, "the bar").unwrap(), text);
+        assert_eq!(unfollow(&added, "https://www.youtube.com/@FOO/").unwrap(), "# mine\n@Bar | The Bar\n");
+        assert_eq!(unfollow(&added, "@nobody"), None);
+    }
 
     #[test]
     fn handles_ids_and_urls() {

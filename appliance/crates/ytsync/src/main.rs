@@ -30,6 +30,54 @@ fn config() -> Result<Config, String> {
     })
 }
 
+/// `ytsync follow <entry> [name]`, `ytsync unfollow <entry-or-name>` and `ytsync list` edit the
+/// channels file in place (so its owner and mode stay as they are); no arguments run the sync.
+fn manage(list: &std::path::Path, args: &[String]) -> Option<ExitCode> {
+    let cmd = args.first()?.as_str();
+    let text = std::fs::read_to_string(list).unwrap_or_default();
+    let save = |new: String| match std::fs::write(list, new) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("cannot write {}: {e}", list.display());
+            ExitCode::from(2)
+        }
+    };
+    Some(match (cmd, args.len()) {
+        ("list", 1) => {
+            print!("{text}");
+            ExitCode::SUCCESS
+        }
+        ("follow", 2 | 3) => match channels::follow(&text, &args[1], args.get(2).map(String::as_str)) {
+            Ok(Some(new)) => {
+                println!("following {}", args[1]);
+                save(new)
+            }
+            Ok(None) => {
+                println!("already following {}", args[1]);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::from(2)
+            }
+        },
+        ("unfollow", 2) => match channels::unfollow(&text, &args[1]) {
+            Some(new) => {
+                println!("unfollowed {}", args[1]);
+                save(new)
+            }
+            None => {
+                eprintln!("not following {:?}", args[1]);
+                ExitCode::from(1)
+            }
+        },
+        _ => {
+            eprintln!("usage: ytsync [list | follow <@handle|url|UC-id> [name] | unfollow <entry|name>]");
+            ExitCode::from(2)
+        }
+    })
+}
+
 fn main() -> ExitCode {
     let filter = EnvFilter::try_from_env("YTSYNC_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
     if env_or("YTSYNC_LOG_FORMAT", "json") == "json" {
@@ -48,6 +96,10 @@ fn main() -> ExitCode {
         }
     };
     let list = PathBuf::from(env_or("YTSYNC_CHANNELS", "/persist/ytsync/channels.conf"));
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = manage(&list, &args) {
+        return code;
+    }
     let text = match std::fs::read_to_string(&list) {
         Ok(t) => t,
         Err(e) => {
