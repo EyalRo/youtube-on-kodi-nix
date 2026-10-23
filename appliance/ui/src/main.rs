@@ -122,6 +122,66 @@ fn restore_focus() -> (i32, i32) {
         .unwrap_or((0, 0))
 }
 
+
+/// A 30 ms decaying 1.8 kHz blip as a 16-bit mono WAV, so there is no sound asset to ship.
+fn tick_wav() -> Vec<u8> {
+    const RATE: u32 = 44_100;
+    let n = RATE as usize * 30 / 1000;
+    let mut pcm = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        let t = i as f32 / RATE as f32;
+        let s = (t * 1800.0 * std::f32::consts::TAU).sin() * (-t * 150.0).exp() * 0.6;
+        pcm.extend_from_slice(&((s * i16::MAX as f32) as i16).to_le_bytes());
+    }
+    let mut w = Vec::with_capacity(44 + pcm.len());
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+    w.extend_from_slice(b"WAVEfmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    w.extend_from_slice(&1u16.to_le_bytes()); // mono
+    w.extend_from_slice(&RATE.to_le_bytes());
+    w.extend_from_slice(&(RATE * 2).to_le_bytes());
+    w.extend_from_slice(&2u16.to_le_bytes());
+    w.extend_from_slice(&16u16.to_le_bytes());
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+    w.extend_from_slice(&pcm);
+    w
+}
+
+/// Plays the tick through `UI_TICK_PLAYER` (default `aplay -q`). A tick that arrives while the
+/// previous one is still playing is dropped, so holding an arrow key cannot pile up processes.
+/// `UI_TICK=off` silences it.
+fn tick_player() -> Option<impl FnMut()> {
+    if env_or("UI_TICK", "on") == "off" {
+        return None;
+    }
+    let wav = state_dir().join("tick.wav");
+    std::fs::create_dir_all(state_dir()).ok()?;
+    std::fs::write(&wav, tick_wav()).ok()?;
+    let player = env_or("UI_TICK_PLAYER", "aplay -q");
+    let mut child: Option<std::process::Child> = None;
+    Some(move || {
+        if let Some(c) = child.as_mut() {
+            if matches!(c.try_wait(), Ok(None)) {
+                return;
+            }
+        }
+        let mut parts = player.split_whitespace();
+        let Some(prog) = parts.next() else { return };
+        child = Command::new(prog)
+            .args(parts)
+            .arg(&wav)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| tracing::warn!(error = %e, "cannot play the tick"))
+            .ok();
+    })
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     tracing_subscriber::fmt()
         .json()
@@ -146,6 +206,18 @@ fn main() -> Result<(), slint::PlatformError> {
     let (r, c) = restore_focus();
     ui.set_sel_row(r.max(0));
     ui.set_sel_col(c.max(0));
+
+    if let Some(mut tick) = tick_player() {
+        ui.on_moved(move || tick());
+    }
+    ui.on_config(|| tracing::info!("settings requested (not built yet)"));
+    ui.on_power(|action| {
+        tracing::info!(%action, "power action");
+        let cmd = env_or("UI_POWER_CMD", "systemctl");
+        if let Err(e) = Command::new(&cmd).arg(action.as_str()).status() {
+            tracing::error!(error = %e, %cmd, "power action failed");
+        }
+    });
 
     let weak = ui.as_weak();
     ui.on_quit(|| {

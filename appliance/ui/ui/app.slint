@@ -39,12 +39,50 @@ component Poster inherits Rectangle {
     }
 }
 
+// A line icon drawn from SVG path commands on a 24x24 grid (no icon font needed).
+component Glyph inherits Path {
+    in property <color> tint: white;
+    width: 40px;
+    height: 40px;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    fill: transparent;
+    stroke: tint;
+    stroke-width: 1.8px;
+    stroke-line-cap: round;
+}
+
+// One bar button: a glyph in a rounded square; yellow ring when focused, red when armed.
+component BarButton inherits Rectangle {
+    in property <bool> focused;
+    in property <bool> armed;
+    in property <string> commands;
+    width: 60px;
+    height: 60px;
+    border-radius: 14px;
+    background: armed ? #b3261e : (focused ? #26323d : transparent);
+    border-width: focused ? 4px : 0px;
+    border-color: #ffd54a;
+    Glyph {
+        commands: root.commands;
+        tint: root.focused || root.armed ? white : #7d8892;
+    }
+}
+
 export component App inherits Window {
     in property <[RowData]> rows;
     in-out property <int> sel-row: 0;
     in-out property <int> sel-col: 0;
     callback activate(int, int);
     callback quit();
+    callback moved();
+    callback power(string);
+    callback config();
+    // sel-row == -1 puts the focus on the top bar; bar-sel picks the button (0 settings, 1 reboot,
+    // 2 shutdown). Reboot and shutdown need a second Enter ("armed") within 3 s.
+    in-out property <int> bar-sel: 0;
+    property <int> armed: -1;
+    property <string> notice;
 
     background: #0e1318;
     forward-focus: fs;
@@ -59,16 +97,35 @@ export component App inherits Window {
 
     fs := FocusScope {
         key-pressed(e) => {
+            if (e.text != Key.Return) { armed = -1; }
             if (e.text == Key.RightArrow) {
-                if (sel-col < rows[sel-row].tiles.length - 1) { sel-col += 1; }
+                if (sel-row < 0) {
+                    if (bar-sel < 2) { bar-sel += 1; moved(); }
+                } else if (sel-col < rows[sel-row].tiles.length - 1) { sel-col += 1; moved(); }
             } else if (e.text == Key.LeftArrow) {
-                if (sel-col > 0) { sel-col -= 1; }
+                if (sel-row < 0) {
+                    if (bar-sel > 0) { bar-sel -= 1; moved(); }
+                } else if (sel-col > 0) { sel-col -= 1; moved(); }
             } else if (e.text == Key.DownArrow) {
-                if (sel-row < rows.length - 1) { sel-row += 1; clamp-col(); }
+                if (sel-row < 0) {
+                    if (rows.length > 0) { sel-row = 0; clamp-col(); moved(); }
+                } else if (sel-row < rows.length - 1) { sel-row += 1; clamp-col(); moved(); }
             } else if (e.text == Key.UpArrow) {
-                if (sel-row > 0) { sel-row -= 1; clamp-col(); }
+                if (sel-row >= 0) { sel-row -= 1; moved(); }
             } else if (e.text == Key.Return) {
-                activate(sel-row, sel-col);
+                if (sel-row >= 0) {
+                    activate(sel-row, sel-col);
+                } else if (bar-sel == 0) {
+                    notice = "Settings are not built yet";
+                    notice-timer.running = true;
+                    config();
+                } else if (armed == bar-sel) {
+                    armed = -1;
+                    power(bar-sel == 1 ? "reboot" : "poweroff");
+                } else {
+                    armed = bar-sel;
+                    arm-timer.running = true;
+                }
             } else if (e.text == Key.Escape) {
                 quit();
             } else {
@@ -78,16 +135,68 @@ export component App inherits Window {
         }
     }
 
+    arm-timer := Timer {
+        running: false;
+        interval: 3s;
+        triggered => { armed = -1; self.running = false; }
+    }
+    notice-timer := Timer {
+        running: false;
+        interval: 2500ms;
+        triggered => { notice = ""; self.running = false; }
+    }
+
+    // Top bar: glyph buttons on the right, a short notice on the left.
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: 80px;
+        background: #121a21;
+        Text {
+            x: 60px;
+            text: notice;
+            font-size: 22px;
+            color: #aab4bd;
+            vertical-alignment: center;
+            height: parent.height;
+        }
+        HorizontalLayout {
+            x: root.width - 212px - 60px;
+            y: 10px;
+            width: 212px;
+            height: 60px;
+            spacing: 16px;
+            BarButton {
+                focused: sel-row < 0 && bar-sel == 0;
+                // sliders
+                commands: "M4 7 H6 M10 7 H20 M8 7 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M4 12 H14 M18 12 H20 M16 12 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M4 17 H8 M12 17 H20 M10 17 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0";
+            }
+            BarButton {
+                focused: sel-row < 0 && bar-sel == 1;
+                armed: armed == 1;
+                // circular arrow
+                commands: "M20 12 A8 8 0 1 1 17.66 6.34 M20 3.5 V8.5 H15";
+            }
+            BarButton {
+                focused: sel-row < 0 && bar-sel == 2;
+                armed: armed == 2;
+                // power
+                commands: "M12 3 V12 M7.2 6.2 A8 8 0 1 0 16.8 6.2";
+            }
+        }
+    }
+
     // Rows scroll inside a clipped viewport so only the focused row and the ones below show.
     Rectangle {
         x: 0;
-        y: 40px;
+        y: 80px;
         width: root.width;
-        height: root.height - 40px;
+        height: root.height - 80px;
         clip: true;
     Rectangle {
         x: 0;
-        y: -sel-row * row-h;
+        y: -max(0, sel-row) * row-h;
         animate y { duration: 180ms; easing: ease-out; }
         for r[ri] in rows: Rectangle {
             y: ri * row-h;

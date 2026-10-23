@@ -1,5 +1,5 @@
 # The living-room UI (Slint on DRM/KMS) and its session supervisor.
-{ lib, rustPlatform, pkg-config, makeWrapper, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd }:
+{ lib, rustPlatform, pkg-config, makeWrapper, alsa-utils, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd }:
 
 rustPlatform.buildRustPackage {
   pname = "appliance-ui";
@@ -24,6 +24,8 @@ rustPlatform.buildRustPackage {
 
   postInstall = ''
     install -Dm755 session.sh $out/bin/appliance-ui-session
+    # The focus tick is played with aplay.
+    wrapProgram $out/bin/appliance-ui --prefix PATH : ${lib.makeBinPath [ alsa-utils ]}
   '';
 
   meta = {
