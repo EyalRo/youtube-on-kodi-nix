@@ -36,6 +36,7 @@ impl AppState {
         for w in &scan.warnings {
             tracing::warn!(warning = %w, "scan warning");
         }
+        let counts = library_counts(&scan);
         let stats = self
             .store
             .lock()
@@ -48,8 +49,60 @@ impl AppState {
             episodes = stats.episodes,
             "rescan complete"
         );
+        tracing::info!(
+            movies = counts.movies,
+            movies_with_art = counts.movies_with_art,
+            shows = counts.shows,
+            shows_with_art = counts.shows_with_art,
+            show_episodes = counts.show_episodes,
+            youtube_channels = counts.channels,
+            youtube_channels_with_art = counts.channels_with_art,
+            youtube_videos = counts.youtube_videos,
+            games = counts.games,
+            games_with_art = counts.games_with_art,
+            "library detected"
+        );
         Ok(stats)
     }
+}
+
+/// What a scan found, per kind, and how much of it has artwork: logged after every rescan so a
+/// library that "scanned fine" but shows nothing (or only placeholders) is visible at a glance.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct LibraryCounts {
+    pub movies: usize,
+    pub movies_with_art: usize,
+    pub shows: usize,
+    pub shows_with_art: usize,
+    pub show_episodes: usize,
+    pub channels: usize,
+    pub channels_with_art: usize,
+    pub youtube_videos: usize,
+    pub games: usize,
+    pub games_with_art: usize,
+}
+
+pub fn library_counts(scan: &scanner::Scan) -> LibraryCounts {
+    use catalog::Kind;
+    let mut c = LibraryCounts::default();
+    let mut channel_ids = std::collections::HashSet::new();
+    for e in &scan.entries {
+        let art = usize::from(e.art.is_some());
+        match e.kind {
+            Kind::Movie => { c.movies += 1; c.movies_with_art += art; }
+            Kind::Show => { c.shows += 1; c.shows_with_art += art; }
+            Kind::Channel => { c.channels += 1; c.channels_with_art += art; channel_ids.insert(e.id.as_str()); }
+            Kind::Game => { c.games += 1; c.games_with_art += art; }
+        }
+    }
+    for ep in &scan.episodes {
+        if channel_ids.contains(ep.item_id.as_str()) {
+            c.youtube_videos += 1;
+        } else {
+            c.show_episodes += 1;
+        }
+    }
+    c
 }
 
 struct ApiError(StatusCode, String);
