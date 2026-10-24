@@ -48,8 +48,9 @@
   # The export is mounted once, read-write, and /media is assembled from it: the library folders
   # are bind-mounted read-only so nothing but ytsync (youtube/) can change the NAS. automount +
   # nofail so a missing NAS delays nothing at boot.
+  # (qemu-vm.nix replaces plain `fileSystems`; virtualisation.fileSystems is merged into it.)
   boot.supportedFilesystems = [ "nfs" ];
-  fileSystems =
+  virtualisation.fileSystems =
     let bind = sub: ro: {
       device = "/mnt/nas/${sub}";
       options = [ "bind" ] ++ pkgs.lib.optional ro "ro" ++ [ "nofail" ];
@@ -83,6 +84,8 @@
       UI_PLAY = "play";
       PLAYER_MPV_ARGS = "--vo=drm --hwdec=no";
       PLAYER_DRM_CONNECTOR = "Virtual-1";
+      # Power events (armed, requested, accepted) go to VictoriaLogs as well as the console.
+      UI_VLOGS = "192.168.0.39:9428";
     };
     serviceConfig = {
       # ALSA starts muted.
