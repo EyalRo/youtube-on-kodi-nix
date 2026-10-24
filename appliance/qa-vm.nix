@@ -16,6 +16,8 @@
   boot.initrd.kernelModules = [ "virtio_gpu" ];
   virtualisation.memorySize = 2048;
   virtualisation.cores = 2;
+  # Downloaded videos are staged on the VM disk before they go to the NAS, and the poster cache lives here.
+  virtualisation.diskSize = 8192;
   virtualisation.qemu.options = [
     "-vga none"
     "-device virtio-gpu-pci,xres=1920,yres=1080"
@@ -43,7 +45,7 @@
     rescanSeconds = 30;
     # A first live test: a couple of videos from one channel, not the whole list.
     artsync = { enable = true; tmdbKeyFile = "/persist/artsync/tmdb.key"; };
-    ytsync = { enable = true; seedChannels = ./channels.default.conf; maxChannels = 1; maxPerChannel = 2; };
+    ytsync = { enable = true; seedChannels = ./channels.default.conf; maxChannels = 1; maxPerChannel = 1; maxHeight = 720; };
   };
 
   # The export is mounted once, read-write, and /media is assembled from it: the library folders

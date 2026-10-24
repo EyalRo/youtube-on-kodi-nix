@@ -29,6 +29,11 @@ pub struct Config {
     /// 0 means all channels.
     pub max_channels: usize,
     pub mediad: Option<String>,
+    /// yt-dlp YouTube player clients to use (comma separated); empty keeps yt-dlp's own choice.
+    /// Its default clients currently get HTTP 403 on the video data, so the default here names others.
+    pub player_clients: String,
+    /// yt-dlp `--max-filesize` (e.g. `3G`): a video whose size is known to exceed it is skipped.
+    pub max_filesize: String,
 }
 
 impl Config {
@@ -76,9 +81,15 @@ pub fn ytdlp_args(cfg: &Config, job: &Job) -> Vec<String> {
     ]
     .map(String::from)
     .to_vec();
+    if !cfg.player_clients.is_empty() {
+        a.extend(["--extractor-args".into(), format!("youtube:player_client={}", cfg.player_clients)]);
+    }
     a.extend([
         "-f".into(),
-        format!("bv*[height<={h}]+ba/b[height<={h}]"),
+        // H.264 + AAC at up to 30 fps first: plays everywhere and is about half the size of 60 fps or AV1.
+        format!("bv*[height<={h}][vcodec^=avc1][fps<=30]+ba[ext=m4a]/bv*[height<={h}][vcodec^=avc1]+ba[ext=m4a]/bv*[height<={h}]+ba/b[height<={h}]"),
+        "--max-filesize".into(),
+        cfg.max_filesize.clone(),
         "--playlist-end".into(),
         cfg.max_per_channel.to_string(),
         "--dateafter".into(),
@@ -329,6 +340,8 @@ mod tests {
             max_age_days: 30,
             max_channels: 0,
             mediad: None,
+            player_clients: "mweb".into(),
+            max_filesize: "3G".into(),
         }
     }
 
@@ -473,6 +486,8 @@ mod tests {
         assert!(a.contains("--download-archive /s/archive.txt") && a.ends_with(" U"));
         assert!(a.contains("!is_live"));
         assert!(a.contains("--no-write-playlist-metafiles"));
+        assert!(a.contains("--extractor-args youtube:player_client=mweb"));
+        assert!(a.contains("--max-filesize 3G") && a.contains("vcodec^=avc1"));
         let p = poster_args(&job).join(" ");
         assert!(p.contains("--playlist-items 0") && p.contains("pl_thumbnail:/w/channel") && p.ends_with(" U"));
     }

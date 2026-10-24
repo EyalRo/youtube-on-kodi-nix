@@ -82,6 +82,15 @@ pub fn deliver_poster(work: &Path, channel_dirs: &[PathBuf]) {
     }
 }
 
+/// Only `<stem>.<ext>` is a finished video. yt-dlp's leftovers from a merge that did not happen
+/// (`<stem>.f399.mp4`, `<stem>.temp.mkv`) have more dots and must never be delivered.
+fn is_final_name(path: &Path, stem: &str) -> bool {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    name.strip_prefix(stem)
+        .and_then(|r| r.strip_prefix('.'))
+        .is_some_and(|ext| !ext.contains('.'))
+}
+
 fn copy_atomic(from: &Path, to: &Path) -> io::Result<()> {
     let mut part = to.as_os_str().to_owned();
     part.push(".part");
@@ -152,7 +161,7 @@ pub fn deliver(work: &Path, youtube_root: &Path, fallback_channel: Option<&str>)
         };
         let Some(video) = files
             .iter()
-            .find(|p| VIDEO_EXTS.contains(&ext_of(p).as_str()))
+            .find(|p| VIDEO_EXTS.contains(&ext_of(p).as_str()) && is_final_name(p, &stem))
             .cloned()
         else {
             // Interrupted download: leave nothing behind; the archive never recorded it.
@@ -282,6 +291,20 @@ mod tests {
                 .to_string_lossy()
                 .ends_with(".part"))
         );
+    }
+
+    #[test]
+    fn unmerged_format_files_are_not_a_finished_video() {
+        let work = tempfile::tempdir().unwrap();
+        let lib = tempfile::tempdir().unwrap();
+        put(work.path(), "v [yyy].info.json", r#"{"id":"yyy","channel":"C"}"#);
+        put(work.path(), "v [yyy].f399.mp4", "video only, merge failed");
+        put(work.path(), "v [yyy].f251.webm", "audio only");
+        put(work.path(), "v [yyy].temp.mkv", "merge in progress");
+        let out = deliver(work.path(), lib.path(), None);
+        assert!(out.delivered.is_empty());
+        assert_eq!(out.failed[0].id.as_deref(), Some("yyy"));
+        assert_eq!(fs::read_dir(lib.path()).unwrap().count(), 0);
     }
 
     #[test]

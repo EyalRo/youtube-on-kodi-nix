@@ -113,6 +113,16 @@ in
         description = "systemd OnCalendar expression.";
       };
 
+      maxFilesize = mkOption {
+        type = types.str;
+        default = "3G";
+        description = "yt-dlp --max-filesize: videos known to be bigger are skipped.";
+      };
+      playerClients = mkOption {
+        type = types.str;
+        default = "mweb,tv_simply,web_embedded";
+        description = "yt-dlp YouTube player clients (comma separated). yt-dlp's own default currently gets HTTP 403 on video data; these download. Empty keeps yt-dlp's choice.";
+      };
       maxPerChannel = mkOption { type = types.ints.positive; default = 5; };
       maxAgeDays = mkOption { type = types.ints.positive; default = 30; };
       maxHeight = mkOption { type = types.ints.positive; default = 1080; };
@@ -180,6 +190,8 @@ in
         YTSYNC_YTDLP = "${pkgs.yt-dlp}/bin/yt-dlp";
         YTSYNC_MEDIAD = cfg.bind;
         YTSYNC_MAX_PER_CHANNEL = toString cfg.ytsync.maxPerChannel;
+        YTSYNC_PLAYER_CLIENTS = cfg.ytsync.playerClients;
+        YTSYNC_MAX_FILESIZE = cfg.ytsync.maxFilesize;
         YTSYNC_MAX_AGE_DAYS = toString cfg.ytsync.maxAgeDays;
         YTSYNC_MAX_HEIGHT = toString cfg.ytsync.maxHeight;
         YTSYNC_MAX_CHANNELS = toString cfg.ytsync.maxChannels;

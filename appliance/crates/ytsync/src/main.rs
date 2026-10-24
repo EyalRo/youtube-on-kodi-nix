@@ -27,6 +27,8 @@ fn config() -> Result<Config, String> {
         max_age_days: env_num("YTSYNC_MAX_AGE_DAYS", 30)?,
         max_channels: env_num("YTSYNC_MAX_CHANNELS", 0)?,
         mediad: Some(env_or("YTSYNC_MEDIAD", "127.0.0.1:8730")).filter(|a| !a.is_empty()),
+        player_clients: env_or("YTSYNC_PLAYER_CLIENTS", "mweb,tv_simply,web_embedded"),
+        max_filesize: env_or("YTSYNC_MAX_FILESIZE", "3G"),
     })
 }
 
