@@ -209,8 +209,31 @@ export component App inherits Window {
         width: root.width;
         height: 80px;
         background: #121a21;
+        // The wordmark, in a streaming-service red: heavy, widely spaced, with a dark offset
+        // shadow for the embossed look. Hebrew, reading right to left.
+        Text {
+            x: 62px;
+            y: 3px;
+            text: "שמטפליקס";
+            font-size: 46px;
+            font-weight: 900;
+            letter-spacing: 3px;
+            color: #5c0a0e;
+            vertical-alignment: center;
+            height: parent.height;
+        }
         Text {
             x: 60px;
+            text: "שמטפליקס";
+            font-size: 46px;
+            font-weight: 900;
+            letter-spacing: 3px;
+            color: #e50914;
+            vertical-alignment: center;
+            height: parent.height;
+        }
+        Text {
+            x: 330px;
             text: notice;
             font-size: 22px;
             color: #aab4bd;
