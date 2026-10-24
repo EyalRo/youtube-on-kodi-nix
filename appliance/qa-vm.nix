@@ -42,11 +42,12 @@
     package = appliance;
     rescanSeconds = 30;
     # A first live test: a couple of videos from one channel, not the whole list.
+    artsync = { enable = true; tmdbKeyFile = "/persist/artsync/tmdb.key"; };
     ytsync = { enable = true; seedChannels = ./channels.default.conf; maxChannels = 1; maxPerChannel = 2; };
   };
 
   # The export is mounted once, read-write, and /media is assembled from it: the library folders
-  # are bind-mounted read-only so nothing but ytsync (youtube/) can change the NAS. automount +
+  # are bind-mounted read-only so nothing but ytsync (youtube/) can change the NAS. automount (no idle unmount: mediad and artsync depend on the mount, and would be stopped with it) +
   # nofail so a missing NAS delays nothing at boot.
   # (qemu-vm.nix replaces plain `fileSystems`; virtualisation.fileSystems is merged into it.)
   boot.supportedFilesystems = [ "nfs" ];
@@ -60,7 +61,7 @@
       "/mnt/nas" = {
         device = nfsShare;
         fsType = "nfs";
-        options = [ "vers=3" "nofail" "x-systemd.automount" "x-systemd.idle-timeout=600" "_netdev" ];
+        options = [ "vers=3" "nofail" "x-systemd.automount" "_netdev" ];
       };
       "/media/movies" = bind "movies" true;
       "/media/tv" = bind "tv" true;
@@ -68,7 +69,7 @@
       "/media/youtube" = bind "youtube" false;
     };
   # The youtube folder is the one place the box writes; world-writable because the NAS maps ids.
-  systemd.tmpfiles.rules = [ "d /mnt/nas/youtube 0777 - - -" ];
+  systemd.tmpfiles.rules = [ "d /mnt/nas/youtube 0777 - - -" "d /persist/artsync 0750 mediad mediad -" ];
   # Start mediad only once the library is mounted, not on an empty /media.
   systemd.services.mediad.unitConfig.RequiresMountsFor = [ "/media/movies" "/media/tv" "/media/roms" "/media/youtube" ];
 

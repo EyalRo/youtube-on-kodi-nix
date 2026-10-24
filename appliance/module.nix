@@ -63,6 +63,29 @@ in
       description = "Log filter (error, warn, info, debug, trace; per-target filters allowed). Logs are JSON on the journal.";
     };
 
+    artsync = {
+      enable = mkEnableOption "the poster artwork fetcher (local cache, never written to the library)";
+
+      tmdbKeyFile = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "/persist/artsync/tmdb.key";
+        description = "File holding a TMDB API key (v3) or read token (v4); a string, not a path, so the secret stays out of the Nix store. Without it only games get artwork.";
+      };
+
+      schedule = mkOption {
+        type = types.str;
+        default = "*-*-* 00/6:30:00";
+        description = "systemd OnCalendar expression.";
+      };
+
+      maxLookups = mkOption {
+        type = types.ints.unsigned;
+        default = 0;
+        description = "Lookups per run; 0 means all.";
+      };
+    };
+
     ytsync = {
       enable = mkEnableOption "the YouTube download job";
 
@@ -109,6 +132,7 @@ in
 
     systemd.tmpfiles.rules =
       [ "d ${cfg.stateDir} 0750 ${cfg.user} ${cfg.group} -" ]
+      ++ [ "d ${cfg.stateDir}/art 0750 ${cfg.user} ${cfg.group} -" ]
       ++ lib.optional ytsyncEnabled "d ${cfg.ytsync.stateDir} 0750 ${cfg.user} ${cfg.group} -"
       ++ lib.optional (ytsyncEnabled && cfg.ytsync.seedChannels != null)
         "C ${cfg.ytsync.channelsFile} 0640 ${cfg.user} ${cfg.group} - ${cfg.ytsync.seedChannels}";
@@ -124,6 +148,7 @@ in
         MEDIAD_BIND = cfg.bind;
         MEDIAD_RESCAN_SECS = toString cfg.rescanSeconds;
         MEDIAD_LOG = cfg.logLevel;
+        MEDIAD_ART_CACHE = "${cfg.stateDir}/art";
       } // lib.optionalAttrs (cfg.releaseDbDir != null) {
         MEDIAD_RELEASE_DB = toString cfg.releaseDbDir;
       };
@@ -173,6 +198,44 @@ in
         NoNewPrivileges = true;
         ReadWritePaths = [ cfg.ytsync.stateDir "${toString cfg.mediaRoot}/youtube" ];
         TimeoutStartSec = "6h";
+      };
+    };
+
+    systemd.services.artsync = mkIf cfg.artsync.enable {
+      description = "Fetch missing poster artwork into the local cache";
+      after = [ "mediad.service" "network-online.target" ];
+      wants = [ "network-online.target" ];
+      requires = [ "mediad.service" ];
+      path = [ pkgs.curl ];
+      environment = {
+        ARTSYNC_MEDIAD = cfg.bind;
+        ARTSYNC_CACHE = "${cfg.stateDir}/art";
+        ARTSYNC_MAX_LOOKUPS = toString cfg.artsync.maxLookups;
+        ARTSYNC_LOG = cfg.logLevel;
+        SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
+      } // lib.optionalAttrs (cfg.artsync.tmdbKeyFile != null) {
+        ARTSYNC_TMDB_KEY_FILE = cfg.artsync.tmdbKeyFile;
+      };
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${cfg.package}/bin/artsync";
+        User = cfg.user;
+        Group = cfg.group;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+        ReadWritePaths = [ "${cfg.stateDir}/art" ];
+        TimeoutStartSec = "2h";
+      };
+    };
+
+    systemd.timers.artsync = mkIf cfg.artsync.enable {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "2min";
+        OnCalendar = cfg.artsync.schedule;
+        Persistent = true;
       };
     };
 

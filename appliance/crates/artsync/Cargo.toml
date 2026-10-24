@@ -1,0 +1,16 @@
+[package]
+name = "artsync"
+description = "Fetches missing poster artwork into mediad's local cache (TMDB for movies and shows, libretro thumbnails for games)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+catalog = { path = "../catalog" }
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

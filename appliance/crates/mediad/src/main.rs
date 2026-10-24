@@ -52,7 +52,12 @@ async fn main() {
     };
     tracing::info!(media_root = %media_root.display(), db = %db_path.display(), %bind, rescan_secs, "mediad starting");
 
-    let state = AppState::new(store, media_root, release_db);
+    let mut state = AppState::new(store, media_root, release_db);
+    if let Ok(dir) = std::env::var("MEDIAD_ART_CACHE")
+        && !dir.is_empty()
+    {
+        state = state.with_art_cache(PathBuf::from(dir));
+    }
 
     if rescan_secs > 0 {
         let state = state.clone();

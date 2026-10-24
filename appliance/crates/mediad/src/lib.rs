@@ -19,6 +19,8 @@ pub struct AppState {
     store: Arc<Mutex<Store>>,
     media_root: Arc<PathBuf>,
     release_db: Arc<ReleaseDb>,
+    /// Where artsync stores fetched posters (`<item id>.jpg|png|webp`).
+    art_cache: Option<Arc<PathBuf>>,
 }
 
 impl AppState {
@@ -27,12 +29,21 @@ impl AppState {
             store: Arc::new(Mutex::new(store)),
             media_root: Arc::new(media_root),
             release_db: Arc::new(release_db),
+            art_cache: None,
         }
+    }
+
+    pub fn with_art_cache(mut self, dir: PathBuf) -> Self {
+        self.art_cache = Some(Arc::new(dir));
+        self
     }
 
     /// Scan the media root and replace the catalog. Blocking: call from `spawn_blocking`.
     pub fn rescan(&self) -> Result<store::ScanStats, StoreError> {
-        let scan = scanner::scan_all(&self.media_root, &self.release_db);
+        let mut scan = scanner::scan_all(&self.media_root, &self.release_db);
+        if let Some(dir) = &self.art_cache {
+            use_art_cache(&mut scan, dir);
+        }
         for w in &scan.warnings {
             tracing::warn!(warning = %w, "scan warning");
         }
@@ -63,6 +74,16 @@ impl AppState {
             "library detected"
         );
         Ok(stats)
+    }
+}
+
+/// Entries with no artwork next to their media get the cached poster, if artsync fetched one.
+fn use_art_cache(scan: &mut scanner::Scan, dir: &std::path::Path) {
+    for e in scan.entries.iter_mut().filter(|e| e.art.is_none()) {
+        e.art = ["jpg", "png", "webp"]
+            .iter()
+            .map(|x| dir.join(format!("{}.{x}", e.id)))
+            .find(|p| p.is_file());
     }
 }
 
