@@ -74,7 +74,7 @@ fn manage(list: &std::path::Path, args: &[String]) -> Option<ExitCode> {
             }
         },
         _ => {
-            eprintln!("usage: ytsync [list | follow <@handle|url|UC-id> [name] | unfollow <entry|name>]");
+            eprintln!("usage: ytsync [now <entry> | list | follow <@handle|url|UC-id> [name] | unfollow <entry|name>]");
             ExitCode::from(2)
         }
     })
@@ -98,18 +98,39 @@ fn main() -> ExitCode {
         }
     };
     let list = PathBuf::from(env_or("YTSYNC_CHANNELS", "/persist/ytsync/channels.conf"));
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Some(code) = manage(&list, &args) {
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // `ytsync-now` (the module's helper) hands the entry to the unit through this variable.
+    if let Ok(entry) = std::env::var("YTSYNC_NOW")
+        && !entry.is_empty()
+    {
+        args = vec!["now".into(), entry];
+    }
+    // `ytsync now <entry>`: sync just that channel, whether or not it is followed, ignoring the
+    // per-run channel cap; the followed list is not touched.
+    let now = args.first().map(String::as_str) == Some("now");
+    if !now && let Some(code) = manage(&list, &args) {
         return code;
     }
-    let text = match std::fs::read_to_string(&list) {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!(file = %list.display(), error = %e, "cannot read the channels file");
-            return ExitCode::from(2);
+    let text = if now {
+        args[1..].join(" ")
+    } else {
+        match std::fs::read_to_string(&list) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!(file = %list.display(), error = %e, "cannot read the channels file");
+                return ExitCode::from(2);
+            }
         }
     };
+    let mut cfg = cfg;
+    if now {
+        cfg.max_channels = 0;
+    }
     let parsed = channels::parse(&text);
+    if now && parsed.channels.is_empty() {
+        eprintln!("usage: ytsync now <@handle|url|UC-id>");
+        return ExitCode::from(2);
+    }
     for s in &parsed.skipped {
         tracing::warn!(entry = %s, "channel entry not understood (use @handle, a channel URL or a UC... id); skipped");
     }
