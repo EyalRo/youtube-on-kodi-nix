@@ -77,6 +77,8 @@ export component App inherits Window {
     callback quit();
     callback moved();
     callback power(string);
+    callback arm(string);
+    callback disarm(string, string);
     callback config();
     // sel-row == -1 puts the focus on the top bar; bar-sel picks the button (0 settings, 1 reboot,
     // 2 shutdown). Reboot and shutdown need a second Enter ("armed") within 3 s.
@@ -97,7 +99,10 @@ export component App inherits Window {
 
     fs := FocusScope {
         key-pressed(e) => {
-            if (e.text != Key.Return) { armed = -1; }
+            if (e.text != Key.Return) {
+                if (armed >= 0) { disarm(armed == 1 ? "reboot" : "poweroff", "key"); }
+                armed = -1;
+            }
             if (e.text == Key.RightArrow) {
                 if (sel-row < 0) {
                     if (bar-sel < 2) { bar-sel += 1; moved(); }
@@ -124,6 +129,7 @@ export component App inherits Window {
                     power(bar-sel == 1 ? "reboot" : "poweroff");
                 } else {
                     armed = bar-sel;
+                    arm(bar-sel == 1 ? "reboot" : "poweroff");
                     arm-timer.running = true;
                 }
             } else if (e.text == Key.Escape) {
@@ -138,7 +144,11 @@ export component App inherits Window {
     arm-timer := Timer {
         running: false;
         interval: 3s;
-        triggered => { armed = -1; self.running = false; }
+        triggered => {
+            if (armed >= 0) { disarm(armed == 1 ? "reboot" : "poweroff", "timeout"); }
+            armed = -1;
+            self.running = false;
+        }
     }
     notice-timer := Timer {
         running: false;

@@ -108,6 +108,12 @@ fn load_rows(addr: &str, cache: &Path) -> Result<Vec<RowData>, String> {
     Ok(out)
 }
 
+/// The raw row listing, to tell whether the library changed without fetching every row.
+fn listing_sig(addr: &str) -> Option<String> {
+    let (status, _, body) = get(addr, "/rows").ok()?;
+    (status == 200).then(|| String::from_utf8_lossy(&body).into_owned())
+}
+
 fn state_dir() -> PathBuf {
     PathBuf::from(env_or("UI_STATE", "/tmp/appliance-ui"))
 }
@@ -122,6 +128,50 @@ fn restore_focus() -> (i32, i32) {
         .unwrap_or((0, 0))
 }
 
+
+/// One-line JSON event to VictoriaLogs (`UI_VLOGS=host:port`; unset or empty disables it).
+/// Best effort with short timeouts: a missing log server must never hold up a power action.
+fn ship_event(event: &str, action: &str, detail: &str) {
+    use std::net::ToSocketAddrs;
+    let Ok(addr) = std::env::var("UI_VLOGS") else { return };
+    let Some(sock) = addr.to_socket_addrs().ok().and_then(|mut a| a.next()) else { return };
+    let host = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default();
+    let body = serde_json::json!({
+        "_msg": format!("power {event}: {action} {detail}").trim_end(),
+        "app": "appliance-ui",
+        "host": host.trim(),
+        "event": event,
+        "action": action,
+        "detail": detail,
+    })
+    .to_string();
+    let t = Duration::from_secs(2);
+    let sent = TcpStream::connect_timeout(&sock, t).and_then(|mut s| {
+        s.set_read_timeout(Some(t))?;
+        s.set_write_timeout(Some(t))?;
+        write!(
+            s,
+            "POST /insert/jsonline?_stream_fields=app,host&_msg_field=_msg HTTP/1.0\r\nHost: {addr}\r\nContent-Type: application/stream+json\r\nContent-Length: {}\r\n\r\n{body}\n",
+            body.len() + 1
+        )?;
+        let mut status = String::new();
+        s.read_to_string(&mut status)?; // wait for the reply so the event is in before we power off
+        Ok(status)
+    });
+    if let Err(e) = sent {
+        tracing::warn!(error = %e, "could not ship the event to VictoriaLogs");
+    }
+}
+
+/// A power event goes to the journal (tracing), the system console and VictoriaLogs.
+fn power_event(event: &str, action: &str, detail: &str) {
+    tracing::info!(event, action, detail, "power");
+    let line = format!("appliance-ui: power {event}: {action} {detail}\n");
+    if let Ok(mut c) = std::fs::OpenOptions::new().append(true).open("/dev/console") {
+        let _ = c.write_all(line.as_bytes());
+    }
+    ship_event(event, action, detail);
+}
 
 /// A 30 ms decaying 1.8 kHz blip as a 16-bit mono WAV, so there is no sound asset to ship.
 fn tick_wav() -> Vec<u8> {
@@ -207,15 +257,47 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_sel_row(r.max(0));
     ui.set_sel_col(c.max(0));
 
+    // mediad scans in the background (a NAS library takes a while the first time, and new
+    // downloads arrive later), so keep checking: when its row listing changes, reload the rows.
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(listing_sig(&mediad).unwrap_or_default()));
+    let refresh = slint::Timer::default();
+    {
+        let (weak, mediad, cache) = (ui.as_weak(), mediad.clone(), cache.clone());
+        refresh.start(slint::TimerMode::Repeated, Duration::from_secs(10), move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(sig) = listing_sig(&mediad) else { return };
+            if sig == *seen.borrow() {
+                return;
+            }
+            match load_rows(&mediad, &cache) {
+                Ok(rows) => {
+                    tracing::info!(rows = rows.len(), "rows refreshed");
+                    ui.set_rows(ModelRc::new(VecModel::from(rows)));
+                    let last = ui.get_rows().row_count() as i32 - 1;
+                    ui.set_sel_row(ui.get_sel_row().min(last));
+                    if let Some(r) = ui.get_rows().row_data(ui.get_sel_row().max(0) as usize) {
+                        ui.set_sel_col(ui.get_sel_col().min(r.tiles.row_count() as i32 - 1).max(0));
+                    }
+                    *seen.borrow_mut() = sig;
+                }
+                Err(e) => tracing::warn!(error = %e, "cannot refresh rows"),
+            }
+        });
+    }
+
     if let Some(mut tick) = tick_player() {
         ui.on_moved(move || tick());
     }
     ui.on_config(|| tracing::info!("settings requested (not built yet)"));
+    ui.on_arm(|action| power_event("armed", action.as_str(), "press Enter again within 3 s to confirm"));
+    ui.on_disarm(|action, why| power_event("cancelled", action.as_str(), why.as_str()));
     ui.on_power(|action| {
-        tracing::info!(%action, "power action");
+        power_event("requested", action.as_str(), "confirmed on the remote");
         let cmd = env_or("UI_POWER_CMD", "systemctl");
-        if let Err(e) = Command::new(&cmd).arg(action.as_str()).status() {
-            tracing::error!(error = %e, %cmd, "power action failed");
+        match Command::new(&cmd).arg(action.as_str()).status() {
+            Ok(s) if s.success() => power_event("accepted", action.as_str(), &format!("{cmd} exited {s}")),
+            Ok(s) => power_event("failed", action.as_str(), &format!("{cmd} exited {s}")),
+            Err(e) => power_event("failed", action.as_str(), &format!("cannot run {cmd}: {e}")),
         }
     });
 
