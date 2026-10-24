@@ -1,5 +1,17 @@
+export struct EpisodeData {
+    id: string,
+    title: string,
+    subtitle: string,
+    art: image,
+    has-art: bool,
+    watched: bool,
+    /// 0..1 of the way through, for the resume bar.
+    progress: float,
+}
+
 export struct TileData {
     id: string,
+    kind: string,
     title: string,
     subtitle: string,
     art: image,
@@ -80,6 +92,17 @@ export component App inherits Window {
     callback arm(string);
     callback disarm(string, string);
     callback config();
+    // The show or channel page: season tabs (detail-focus 0) over the episodes of one season (1).
+    in property <bool> detail;
+    in property <string> detail-title;
+    in property <[string]> seasons;
+    in property <[EpisodeData]> episodes;
+    in-out property <int> sel-season: 0;
+    in-out property <int> sel-ep: 0;
+    in-out property <int> detail-focus: 0;
+    callback season-changed(int);
+    callback play-episode(int);
+    callback back();
     // sel-row == -1 puts the focus on the top bar; bar-sel picks the button (0 settings, 1 reboot,
     // 2 shutdown). Reboot and shutdown need a second Enter ("armed") within 3 s.
     in-out property <int> bar-sel: 0;
@@ -99,6 +122,29 @@ export component App inherits Window {
 
     fs := FocusScope {
         key-pressed(e) => {
+            if (detail) {
+                if (e.text == Key.LeftArrow) {
+                    if (detail-focus == 0) {
+                        if (sel-season > 0) { sel-season -= 1; season-changed(sel-season); moved(); }
+                    } else if (sel-ep > 0) { sel-ep -= 1; moved(); }
+                } else if (e.text == Key.RightArrow) {
+                    if (detail-focus == 0) {
+                        if (sel-season < seasons.length - 1) { sel-season += 1; season-changed(sel-season); moved(); }
+                    } else if (sel-ep < episodes.length - 1) { sel-ep += 1; moved(); }
+                } else if (e.text == Key.DownArrow) {
+                    if (detail-focus == 0 && episodes.length > 0) { detail-focus = 1; moved(); }
+                } else if (e.text == Key.UpArrow) {
+                    if (detail-focus == 1) { detail-focus = 0; moved(); }
+                } else if (e.text == Key.Return) {
+                    if (detail-focus == 1) { play-episode(sel-ep); }
+                    else if (episodes.length > 0) { detail-focus = 1; moved(); }
+                } else if (e.text == Key.Escape || e.text == Key.Backspace) {
+                    back();
+                } else {
+                    return reject;
+                }
+                return accept;
+            }
             if (e.text != Key.Return) {
                 if (armed >= 0) { disarm(armed == 1 ? "reboot" : "poweroff", "key"); }
                 armed = -1;
@@ -197,8 +243,133 @@ export component App inherits Window {
         }
     }
 
+    // Show / channel page: the title, season tabs, then that season's episodes with thumbnails.
+    if detail: Rectangle {
+        x: 0;
+        y: 80px;
+        width: root.width;
+        height: root.height - 80px;
+        clip: true;
+
+        Text {
+            x: 60px;
+            y: 24px;
+            width: root.width - 120px;
+            text: detail-title;
+            font-size: 40px;
+            font-weight: 700;
+            color: white;
+            overflow: elide;
+        }
+        Rectangle {
+            x: 0;
+            y: 96px;
+            width: root.width;
+            height: 56px;
+            clip: true;
+            for s[i] in seasons: Rectangle {
+                x: 60px + (i - max(0, sel-season - 6)) * 190px;
+                width: 176px;
+                height: 52px;
+                border-radius: 26px;
+                background: i == sel-season ? (detail-focus == 0 ? #ffd54a : #38444f) : transparent;
+                animate x { duration: 150ms; easing: ease-out; }
+                Text {
+                    text: s;
+                    font-size: 24px;
+                    font-weight: 600;
+                    color: i == sel-season ? (detail-focus == 0 ? #0e1318 : white) : #7d8892;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    width: parent.width;
+                    height: parent.height;
+                }
+            }
+        }
+        Rectangle {
+            x: 60px - max(0, sel-ep - 3) * 360px;
+            y: 190px;
+            animate x { duration: 180ms; easing: ease-out; }
+            for ep[ei] in episodes: Rectangle {
+                x: ei * 360px;
+                y: 0px;
+                width: 360px;
+                height: 330px;
+                property <bool> focused: detail-focus == 1 && ei == sel-ep;
+                Rectangle {
+                    x: 8px;
+                    y: parent.focused ? 4px : 10px;
+                    width: 336px;
+                    height: 189px;
+                    border-radius: 10px;
+                    clip: true;
+                    background: Colors.hsv(mod(ei * 47, 360), 0.45, 0.35);
+                    animate y { duration: 120ms; }
+                    if ep.has-art: Image {
+                        source: ep.art;
+                        width: parent.width;
+                        height: parent.height;
+                        image-fit: cover;
+                    }
+                    if !ep.has-art: Text {
+                        text: ep.title;
+                        wrap: word-wrap;
+                        font-size: 22px;
+                        color: white;
+                        width: parent.width - 24px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    if ep.progress > 0 && !ep.watched: Rectangle {
+                        y: parent.height - 6px;
+                        height: 6px;
+                        width: parent.width * ep.progress;
+                        background: #ffd54a;
+                    }
+                    if ep.watched: Rectangle {
+                        x: parent.width - 44px;
+                        y: 8px;
+                        width: 34px;
+                        height: 34px;
+                        border-radius: 17px;
+                        background: #000000a0;
+                        Text { text: "✓"; color: white; font-size: 22px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                Rectangle {
+                    x: 4px;
+                    y: parent.focused ? 0px : 6px;
+                    width: 344px;
+                    height: 197px;
+                    border-radius: 14px;
+                    border-width: parent.focused ? 5px : 0px;
+                    border-color: #ffd54a;
+                }
+                Text {
+                    x: 12px;
+                    y: 214px;
+                    width: 330px;
+                    text: ep.title;
+                    font-size: 22px;
+                    wrap: word-wrap;
+                    overflow: elide;
+                    max-height: 64px;
+                    color: parent.focused ? white : #aab4bd;
+                }
+                Text {
+                    x: 12px;
+                    y: 284px;
+                    width: 330px;
+                    text: ep.subtitle;
+                    font-size: 18px;
+                    color: #6f7b86;
+                }
+            }
+        }
+    }
+
     // Rows scroll inside a clipped viewport so only the focused row and the ones below show.
-    Rectangle {
+    if !detail: Rectangle {
         x: 0;
         y: 80px;
         width: root.width;

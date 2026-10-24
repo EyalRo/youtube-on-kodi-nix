@@ -19,7 +19,7 @@ pkgs.testers.runNixOSTest {
     systemd.services."autovt@".enable = false;
     fonts.packages = [ pkgs.noto-fonts pkgs.dejavu_fonts ];
     environment.systemPackages = [ appliance ui pkgs.mpv pkgs.ffmpeg pkgs.jq pkgs.sqlite ];
-    systemd.tmpfiles.rules = [ "d /media/movies 0755 root root -" ];
+    systemd.tmpfiles.rules = [ "d /media/movies 0755 root root -" "d /media/tv 0755 root root -" ];
     services.media-appliance = { enable = true; package = appliance; rescanSeconds = 0; };
   };
 
@@ -87,6 +87,52 @@ pkgs.testers.runNixOSTest {
         assert machine.succeed("cat /tmp/appliance-ui/focus").strip() == "1 2"
         assert "mpv exited" in ui_log() and "exit status: 0" in ui_log()
         assert "1" in machine.succeed("sqlite3 /persist/mediad/mediad.sqlite 'select count(*) from play_state where watched=1'")
+
+    with subtest("a show opens a page with season tabs and episode thumbnails, and playing returns to it"):
+        for s, e, name in [(1, 1, "Pilot"), (1, 2, "Second"), (2, 1, "Return")]:
+            d = f"/media/tv/Gamma (2020)/Season {s}"
+            machine.succeed(f"mkdir -p '{d}'")
+            f = f"{d}/Gamma - S0{s}E0{e} - {name}"
+            machine.succeed(f"ffmpeg -loglevel error -f lavfi -i testsrc=size=320x180:rate=10 -t 3 -c:v libx264 -preset ultrafast '{f}.mkv'")
+        machine.succeed("ffmpeg -loglevel error -f lavfi -i color=c=0x884422:size=640x360 -frames:v 1 '/media/tv/Gamma (2020)/Season 1/Gamma - S01E01 - Pilot-thumb.jpg'")
+        machine.succeed(f"curl -sf -XPOST {API}/rescan")
+        eps = api("/rows/tvshows")["items"]
+        assert len(eps) == 1, eps
+        detail = api("/items/" + eps[0]["id"])
+        assert sorted({e["season"] for e in detail["episodes"]}) == [1, 2], detail
+        assert [e["has_art"] for e in detail["episodes"]] == [True, False, False], detail
+        ui_unit("exit")
+        machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'rows loaded'", timeout=60)
+        machine.sleep(3)
+        machine.send_key("down")  # movies
+        machine.sleep(1)
+        machine.send_key("down")  # tv shows
+        machine.sleep(1)
+        machine.send_key("ret")
+        machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'page opened'", timeout=30)
+        machine.sleep(3)
+        machine.screenshot("ui-4-page")
+        assert "\"seasons\":2" in ui_log(), ui_log()
+        machine.send_key("up")      # the page opens on the episodes; up reaches the season tabs
+        machine.sleep(1)
+        machine.send_key("right")   # season 2 tab
+        machine.sleep(2)
+        machine.screenshot("ui-5-season2")
+        machine.send_key("down")    # into the episodes
+        machine.sleep(1)
+        machine.send_key("ret")     # play S02E01
+        machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'handing the display to play'", timeout=30)
+        machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -c 'page opened' | grep -q 2", timeout=90)
+        machine.sleep(3)
+        machine.screenshot("ui-6-back-on-page")
+        saved = machine.succeed("cat /tmp/appliance-ui/detail")
+        assert saved.split()[1:] == ["1", "0"], saved + ui_log()
+        machine.send_key("esc")
+        machine.sleep(1)
+        assert machine.execute("test -e /tmp/appliance-ui/detail")[0] != 0, ui_log()
+        # Back to movies only, so the next subtest's first tile is a movie again.
+        machine.succeed("rm -rf /media/tv/*")
+        machine.succeed(f"curl -sf -XPOST {API}/rescan")
 
     with subtest("in-process handoff: does Slint release DRM master on hide()?"):
         ui_unit("inproc")

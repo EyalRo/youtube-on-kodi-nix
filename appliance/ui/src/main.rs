@@ -58,7 +58,12 @@ fn get_json(addr: &str, path: &str) -> Result<Value, String> {
 
 /// Fetch an item's artwork into the cache and decode it.
 fn load_art(addr: &str, id: &str, cache: &Path) -> Option<Image> {
-    let (status, ctype, body) = get(addr, &format!("/items/{id}/art")).ok()?;
+    load_image(addr, &format!("/items/{id}/art"), id, cache)
+}
+
+/// Fetch an image from mediad (`path`) into the cache under `key` and decode it.
+fn load_image(addr: &str, path: &str, key: &str, cache: &Path) -> Option<Image> {
+    let (status, ctype, body) = get(addr, path).ok()?;
     if status != 200 {
         return None;
     }
@@ -67,9 +72,138 @@ fn load_art(addr: &str, id: &str, cache: &Path) -> Option<Image> {
         "image/webp" => "webp",
         _ => "jpg",
     };
-    let file = cache.join(format!("{id}.{ext}"));
+    let file = cache.join(format!("{key}.{ext}"));
     std::fs::write(&file, body).ok()?;
     Image::load_from_path(&file).ok()
+}
+
+/// One season tab and its episodes, as mediad lists them.
+struct Season {
+    label: String,
+    episodes: Vec<Value>,
+}
+
+/// A show or channel page's data.
+struct Detail {
+    id: String,
+    title: String,
+    seasons: Vec<Season>,
+}
+
+/// Group `/items/{id}` episodes into seasons in the order mediad gives them: a show ascending,
+/// a channel newest first (its "seasons" are upload years).
+fn load_detail(addr: &str, id: &str) -> Result<Detail, String> {
+    let v = get_json(addr, &format!("/items/{id}"))?;
+    let channel = v["item"]["kind"].as_str() == Some("channel");
+    let mut seasons: Vec<(i64, Vec<Value>)> = Vec::new();
+    for ep in v["episodes"].as_array().ok_or("no episodes")? {
+        let s = ep["season"].as_i64().unwrap_or(0);
+        match seasons.iter_mut().find(|(n, _)| *n == s) {
+            Some((_, list)) => list.push(ep.clone()),
+            None => seasons.push((s, vec![ep.clone()])),
+        }
+    }
+    Ok(Detail {
+        id: id.to_string(),
+        title: v["item"]["title"].as_str().unwrap_or_default().to_string(),
+        seasons: seasons
+            .into_iter()
+            .map(|(n, episodes)| Season {
+                label: match (channel, n) {
+                    (true, 0) => "Undated".into(),
+                    (true, y) => y.to_string(),
+                    (false, 0) => "Specials".into(),
+                    (false, n) => format!("Season {n}"),
+                },
+                episodes,
+            })
+            .collect(),
+    })
+}
+
+/// The tiles of one season; thumbnails are fetched now, for just these episodes.
+fn season_tiles(addr: &str, season: &Season, channel_view: bool, cache: &Path) -> Vec<EpisodeData> {
+    let _ = std::fs::create_dir_all(cache);
+    season
+        .episodes
+        .iter()
+        .map(|e| {
+            let id = e["id"].as_str().unwrap_or_default();
+            let art = e["has_art"]
+                .as_bool()
+                .unwrap_or(false)
+                .then(|| load_image(addr, &format!("/episodes/{id}/art"), id, cache))
+                .flatten();
+            let aired = e["aired"].as_str().unwrap_or_default();
+            let number = e["episode"].as_i64().unwrap_or(0);
+            let subtitle = if channel_view || number == 0 || number >= 100 {
+                aired.to_string()
+            } else if aired.is_empty() {
+                format!("E{number}")
+            } else {
+                format!("E{number} · {aired}")
+            };
+            let (pos, dur) = (e["position"].as_f64().unwrap_or(0.0), e["duration"].as_f64().unwrap_or(0.0));
+            EpisodeData {
+                id: id.into(),
+                title: e["title"].as_str().unwrap_or_default().into(),
+                subtitle: subtitle.into(),
+                has_art: art.is_some(),
+                art: art.unwrap_or_default(),
+                watched: e["watched"].as_bool().unwrap_or(false),
+                progress: if dur > 0.0 { (pos / dur).clamp(0.0, 1.0) as f32 } else { 0.0 },
+            }
+        })
+        .collect()
+}
+
+fn set_season(ui: &App, addr: &str, detail: &Detail, idx: usize, cache: &Path) {
+    let Some(season) = detail.seasons.get(idx) else { return };
+    // A channel's tabs are years (numeric labels); a show's say "Season".
+    let channel_view = !season.label.starts_with("Season") && season.label != "Specials";
+    ui.set_episodes(ModelRc::new(VecModel::from(season_tiles(addr, season, channel_view, cache))));
+}
+
+/// Open the page for a show or channel at the given season and episode.
+fn open_detail(ui: &App, addr: &str, id: &str, season: usize, ep: usize, cache: &Path) -> Option<Detail> {
+    let detail = match load_detail(addr, id) {
+        Ok(d) if !d.seasons.is_empty() => d,
+        Ok(_) => return None,
+        Err(e) => {
+            tracing::error!(%id, error = %e, "cannot open the page");
+            return None;
+        }
+    };
+    let season = season.min(detail.seasons.len() - 1);
+    ui.set_detail_title(detail.title.as_str().into());
+    ui.set_seasons(ModelRc::new(VecModel::from(
+        detail.seasons.iter().map(|s| SharedString::from(s.label.as_str())).collect::<Vec<_>>(),
+    )));
+    ui.set_sel_season(season as i32);
+    set_season(ui, addr, &detail, season, cache);
+    let eps = ui.get_episodes().row_count();
+    ui.set_sel_ep(ep.min(eps.saturating_sub(1)) as i32);
+    ui.set_detail_focus(1.min(eps as i32));
+    ui.set_detail(true);
+    tracing::info!(%id, seasons = detail.seasons.len(), "page opened");
+    Some(detail)
+}
+
+/// Hand the display to `play` for `id`: exit for the supervisor (default) or run it in-process.
+fn launch(ui: &App, id: &str, inproc: bool, play: &str) {
+    tracing::info!(%id, inproc, "handing the display to play");
+    let dir = state_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    if inproc {
+        let _ = ui.hide();
+        let status = Command::new(play).arg(id).status();
+        tracing::info!(?status, "play returned");
+        let _ = ui.show();
+    } else {
+        let _ = std::fs::write(dir.join("launch"), id);
+        let _ = slint::quit_event_loop();
+        LAUNCH.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 fn load_rows(addr: &str, cache: &Path) -> Result<Vec<RowData>, String> {
@@ -93,6 +227,7 @@ fn load_rows(addr: &str, cache: &Path) -> Result<Vec<RowData>, String> {
                 let art = it["art"].is_string().then(|| load_art(addr, tid, cache)).flatten();
                 TileData {
                     id: tid.into(),
+                    kind: it["kind"].as_str().unwrap_or_default().into(),
                     title: it["title"].as_str().unwrap_or_default().into(),
                     subtitle: it["label2"].as_str().unwrap_or_default().into(),
                     has_art: art.is_some(),
@@ -301,35 +436,75 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    let weak = ui.as_weak();
     ui.on_quit(|| {
         let _ = slint::quit_event_loop();
     });
-    ui.on_activate(move |row, col| {
-        let Some(ui) = weak.upgrade() else { return };
-        let rows = ui.get_rows();
-        let Some(tile) = rows
-            .row_data(row as usize)
-            .and_then(|r| r.tiles.row_data(col as usize))
-        else {
-            return;
-        };
-        let id: SharedString = tile.id;
-        tracing::info!(%id, inproc, "handing the display to play");
-        let dir = state_dir();
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(dir.join("focus"), format!("{row} {col}"));
-        if inproc {
-            let _ = ui.hide();
-            let status = Command::new(&play).arg(id.as_str()).status();
-            tracing::info!(?status, "play returned");
-            let _ = ui.show();
-        } else {
-            let _ = std::fs::write(dir.join("launch"), id.as_str());
-            let _ = slint::quit_event_loop();
-            LAUNCH.store(true, std::sync::atomic::Ordering::SeqCst);
+    // The page being shown, kept so season tabs can switch without another round trip.
+    let page: std::rc::Rc<std::cell::RefCell<Option<Detail>>> = Default::default();
+    let remember_page = |id: &str, season: i32, ep: i32| {
+        let _ = std::fs::write(state_dir().join("detail"), format!("{id} {season} {ep}"));
+    };
+
+    {
+        let (weak, page, mediad, cache_dir) = (ui.as_weak(), page.clone(), mediad.clone(), cache.join("episodes"));
+        ui.on_season_changed(move |idx| {
+            let Some(ui) = weak.upgrade() else { return };
+            if let Some(d) = page.borrow().as_ref() {
+                set_season(&ui, &mediad, d, idx as usize, &cache_dir);
+                ui.set_sel_ep(0);
+            }
+        });
+    }
+    {
+        let (weak, page) = (ui.as_weak(), page.clone());
+        ui.on_back(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let _ = std::fs::remove_file(state_dir().join("detail"));
+            *page.borrow_mut() = None;
+            ui.set_detail(false);
+        });
+    }
+    {
+        let (weak, page, play) = (ui.as_weak(), page.clone(), play.clone());
+        ui.on_play_episode(move |i| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(ep) = ui.get_episodes().row_data(i as usize) else { return };
+            if let Some(d) = page.borrow().as_ref() {
+                remember_page(&d.id, ui.get_sel_season(), i);
+            }
+            launch(&ui, ep.id.as_str(), inproc, &play);
+        });
+    }
+    {
+        let (weak, page, mediad, cache_dir, play) =
+            (ui.as_weak(), page.clone(), mediad.clone(), cache.join("episodes"), play.clone());
+        ui.on_activate(move |row, col| {
+            let Some(ui) = weak.upgrade() else { return };
+            let rows = ui.get_rows();
+            let Some(tile) = rows.row_data(row as usize).and_then(|r| r.tiles.row_data(col as usize)) else {
+                return;
+            };
+            let _ = std::fs::create_dir_all(state_dir());
+            let _ = std::fs::write(state_dir().join("focus"), format!("{row} {col}"));
+            if matches!(tile.kind.as_str(), "show" | "channel") {
+                let opened = open_detail(&ui, &mediad, tile.id.as_str(), 0, 0, &cache_dir);
+                if opened.is_some() {
+                    let _ = std::fs::write(state_dir().join("detail"), format!("{} 0 0", tile.id));
+                }
+                *page.borrow_mut() = opened;
+            } else {
+                launch(&ui, tile.id.as_str(), inproc, &play);
+            }
+        });
+    }
+
+    // Coming back from playing an episode: reopen the page it was started from.
+    if let Ok(text) = std::fs::read_to_string(state_dir().join("detail")) {
+        let mut p = text.split_whitespace();
+        if let (Some(id), Some(s), Some(e)) = (p.next(), p.next().and_then(|x| x.parse().ok()), p.next().and_then(|x| x.parse().ok())) {
+            *page.borrow_mut() = open_detail(&ui, &mediad, id, s, e, &cache.join("episodes"));
         }
-    });
+    }
     ui.run()?;
     if LAUNCH.load(std::sync::atomic::Ordering::SeqCst) {
         std::process::exit(EXIT_LAUNCH);
