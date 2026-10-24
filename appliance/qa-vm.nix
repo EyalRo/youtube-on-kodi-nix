@@ -91,7 +91,9 @@
       SLINT_BACKEND = "linuxkms-software";
       UI_HANDOFF = "exit";
       UI_PLAY = "play";
-      PLAYER_MPV_ARGS = "--vo=drm --hwdec=no";
+      PLAYER_MPV_ARGS = "--vo=drm --hwdec=no --audio-spdif= --audio-channels=stereo";
+      # The NUC default is its HDMI port; the VM has one analog HDA card.
+      PLAYER_AUDIO_DEVICE = "alsa/default";
       PLAYER_DRM_CONNECTOR = "Virtual-1";
       # Power events (armed, requested, accepted) go to VictoriaLogs as well as the console.
       UI_VLOGS = "192.168.0.39:9428";
