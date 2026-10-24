@@ -131,6 +131,7 @@
         e2e-stress-trivial-py314 = e2eStressTrivial314 pkgs;
         skin = skin pkgs;
         appliance = pkgs.callPackage ./appliance/package.nix { };
+        appliance-ui = pkgs.callPackage ./appliance/ui/package.nix { };
       });
 
       # nix run .#e2e
@@ -157,6 +158,10 @@
       # Media appliance back end (mediad + ytsync). Set `services.media-appliance.package`
       # to `youtube-on-kodi.packages.<system>.appliance`.
       nixosModules.appliance = import ./appliance/module.nix;
+
+      # The UI on the main display (tty1, its own user and logind session), for real hardware;
+      # set `services.media-appliance.kiosk.package` to `packages.<system>.appliance-ui`.
+      nixosModules.appliance-kiosk = import ./appliance/kiosk.nix;
 
       # Hands-on QA VM (the NAS library from the workstation's /mnt/media): see appliance/qa-vm.nix
       nixosConfigurations.appliance-qa = nixpkgs.lib.nixosSystem {
