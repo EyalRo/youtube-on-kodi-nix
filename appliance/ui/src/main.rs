@@ -67,10 +67,15 @@ fn load_image(addr: &str, path: &str, key: &str, cache: &Path) -> Option<Image> 
     if status != 200 {
         return None;
     }
-    let ext = match ctype.as_str() {
-        "image/png" => "png",
-        "image/webp" => "webp",
-        _ => "jpg",
+    // The bytes decide, not the header or the name: a channel avatar is a PNG called poster.jpg.
+    let ext = if body.starts_with(b"\x89PNG") {
+        "png"
+    } else if body.starts_with(b"RIFF") {
+        "webp"
+    } else if ctype == "image/png" {
+        "png"
+    } else {
+        "jpg"
     };
     let file = cache.join(format!("{key}.{ext}"));
     std::fs::write(&file, body).ok()?;

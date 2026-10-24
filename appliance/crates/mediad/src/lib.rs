@@ -267,15 +267,13 @@ async fn serve_image(path: PathBuf) -> ApiResult<Response> {
         tracing::warn!(path = %path.display(), error = %e, "artwork unreadable");
         not_found("artwork")
     })?;
-    let mime = match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("png") => "image/png",
-        Some("webp") => "image/webp",
-        _ => "image/jpeg",
+    // By content, not file name: yt-dlp avatars are PNGs saved as poster.jpg.
+    let mime = if bytes.starts_with(b"\x89PNG") {
+        "image/png"
+    } else if bytes.starts_with(b"RIFF") {
+        "image/webp"
+    } else {
+        "image/jpeg"
     };
     Ok(([(header::CONTENT_TYPE, mime)], bytes).into_response())
 }
