@@ -105,6 +105,8 @@ pub struct Episode {
     pub aired: Option<NaiveDate>,
     pub date_source: DateSource,
     pub path: PathBuf,
+    /// A thumbnail next to the video (or fetched into the art cache).
+    pub art: Option<PathBuf>,
 }
 
 /// An entry as the row engine sees it, with watch state folded in.

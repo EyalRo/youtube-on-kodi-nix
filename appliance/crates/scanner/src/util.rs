@@ -91,3 +91,18 @@ pub fn newest_episode(episodes: &[Episode]) -> Option<&Episode> {
                 .max_by_key(|e| e.aired)
         })
 }
+
+/// A thumbnail next to a video file: `<stem>-thumb.jpg` (Kodi, Sonarr) or `<stem>.jpg` (yt-dlp).
+pub fn episode_art(video: &Path) -> Option<PathBuf> {
+    let dir = video.parent()?;
+    let stem = file_stem(video);
+    for suffix in ["-thumb", ""] {
+        for ext in ["jpg", "jpeg", "png", "webp"] {
+            let p = dir.join(format!("{stem}{suffix}.{ext}"));
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}

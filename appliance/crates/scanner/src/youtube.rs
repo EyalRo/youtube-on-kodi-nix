@@ -7,7 +7,7 @@ use catalog::{DateSource, Episode, Kind, MediaEntry, parse_release};
 use chrono::{DateTime, Datelike, NaiveDate};
 use regex::Regex;
 
-use crate::util::{file_name, file_stem, find_art, is_video, mtime_date, newest_episode, subdirs};
+use crate::util::{episode_art, file_name, file_stem, find_art, is_video, mtime_date, newest_episode, subdirs};
 use crate::{Scan, ids};
 
 static DATE_PREFIX: LazyLock<Regex> =
@@ -83,6 +83,7 @@ pub fn scan(media_root: &Path) -> Scan {
                     episode: 0,
                     title,
                     aired,
+                    art: episode_art(&video),
                     date_source: source,
                     path: video,
                 },

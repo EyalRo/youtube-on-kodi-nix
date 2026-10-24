@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS episodes (
     title TEXT NOT NULL,
     aired TEXT,
     date_source TEXT NOT NULL,
-    path TEXT NOT NULL
+    path TEXT NOT NULL,
+    art TEXT
 );
 CREATE INDEX IF NOT EXISTS episodes_item ON episodes(item_id);
 CREATE TABLE IF NOT EXISTS play_state (
@@ -81,6 +82,7 @@ pub struct EpisodeView {
     pub watched: bool,
     pub position: f64,
     pub duration: f64,
+    pub art: Option<String>,
 }
 
 /// What the player needs to start something.
@@ -128,6 +130,14 @@ impl Store {
     }
 
     fn init(conn: Connection) -> Result<Store, StoreError> {
+        // `episodes` is rebuilt by every scan, so an older layout (no `art` column) is just dropped.
+        let old = conn
+            .prepare("PRAGMA table_info(episodes)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !old.is_empty() && !old.iter().any(|c| c == "art") {
+            conn.execute_batch("DROP TABLE episodes")?;
+        }
         conn.execute_batch(SCHEMA)?;
         Ok(Store { conn })
     }
@@ -175,8 +185,8 @@ impl Store {
         tx.execute("DELETE FROM episodes", [])?;
         for ep in &scan.episodes {
             tx.execute(
-                "INSERT INTO episodes (id, item_id, season, episode, title, aired, date_source, path)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO episodes (id, item_id, season, episode, title, aired, date_source, path, art)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     ep.id,
                     ep.item_id,
@@ -186,6 +196,7 @@ impl Store {
                     ep.aired.map(|d| d.to_string()),
                     ep.date_source.as_str(),
                     ep.path.to_string_lossy(),
+                    ep.art.as_ref().map(|a| a.to_string_lossy().into_owned()),
                 ],
             )?;
         }
@@ -272,6 +283,15 @@ impl Store {
         Ok(self.items()?.into_iter().find(|i| i.id == id))
     }
 
+    /// The thumbnail file of an episode, if it has one.
+    pub fn episode_art(&self, id: &str) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .conn
+            .query_row("SELECT art FROM episodes WHERE id = ?1", params![id], |r| r.get::<_, Option<String>>(0))
+            .optional()?
+            .flatten())
+    }
+
     /// Episodes of a show (season, episode order) or channel (newest first), with watch state.
     pub fn episodes_of(&self, item_id: &str) -> Result<Vec<EpisodeView>, StoreError> {
         let channel = self
@@ -290,7 +310,7 @@ impl Store {
         };
         let mut stmt = self.conn.prepare(&format!(
             "SELECT e.id, e.season, e.episode, e.title, e.aired, e.date_source,
-                    COALESCE(ps.watched, 0), COALESCE(ps.position, 0), COALESCE(ps.duration, 0)
+                    COALESCE(ps.watched, 0), COALESCE(ps.position, 0), COALESCE(ps.duration, 0), e.art
              FROM episodes e LEFT JOIN play_state ps ON ps.id = e.id
              WHERE e.item_id = ?1 ORDER BY {order}"
         ))?;
@@ -305,6 +325,7 @@ impl Store {
                 watched: r.get::<_, i64>(6)? != 0,
                 position: r.get(7)?,
                 duration: r.get(8)?,
+                art: r.get(9)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -507,6 +528,7 @@ mod tests {
             aired: d(aired),
             date_source: DateSource::Nfo,
             path: PathBuf::from(format!("/media/{id}.mkv")),
+            art: None,
         }
     }
 
@@ -638,6 +660,19 @@ mod tests {
         s.save_progress("e-c2", 1000.0, 1000.0).unwrap();
         assert_eq!(s.play_info("s-1").unwrap().unwrap().id, "e-2");
         assert_eq!(s.play_info("c-1").unwrap().unwrap().id, "e-c1");
+    }
+
+    #[test]
+    fn episode_thumbnails_are_stored_and_served() {
+        let mut s = Store::open_in_memory().unwrap();
+        let mut sc = scan();
+        sc.episodes[0].art = Some(PathBuf::from("/art/e.jpg"));
+        let id = sc.episodes[0].id.clone();
+        let item = sc.episodes[0].item_id.clone();
+        s.apply_scan(&sc).unwrap();
+        assert_eq!(s.episode_art(&id).unwrap().as_deref(), Some("/art/e.jpg"));
+        assert!(s.episodes_of(&item).unwrap().iter().any(|e| e.id == id && e.art.is_some()));
+        assert_eq!(s.episode_art("nope").unwrap(), None);
     }
 
     #[test]

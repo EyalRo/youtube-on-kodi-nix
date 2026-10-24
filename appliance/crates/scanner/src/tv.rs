@@ -7,7 +7,7 @@ use regex::Regex;
 use walkdir::WalkDir;
 
 use crate::util::{
-    file_name, file_stem, find_art, is_video, mtime_date, newest_episode, nfo_tag, subdirs,
+    episode_art, file_name, file_stem, find_art, is_video, mtime_date, newest_episode, nfo_tag, subdirs,
 };
 use crate::{Scan, ids};
 
@@ -90,6 +90,7 @@ pub fn scan(media_root: &Path) -> Scan {
                 aired,
                 date_source: source,
                 path: path.to_path_buf(),
+                art: episode_art(path),
             });
         }
         if episodes.is_empty() {

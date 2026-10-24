@@ -85,6 +85,12 @@ fn use_art_cache(scan: &mut scanner::Scan, dir: &std::path::Path) {
             .map(|x| dir.join(format!("{}.{x}", e.id)))
             .find(|p| p.is_file());
     }
+    for e in scan.episodes.iter_mut().filter(|e| e.art.is_none()) {
+        e.art = ["jpg", "png", "webp"]
+            .iter()
+            .map(|x| dir.join(format!("{}.{x}", e.id)))
+            .find(|p| p.is_file());
+    }
 }
 
 /// What a scan found, per kind, and how much of it has artwork: logged after every rescan so a
@@ -163,6 +169,7 @@ pub fn router(state: AppState) -> Router {
         .route("/items/{id}/progress", post(progress))
         .route("/items/{id}/played", post(played))
         .route("/items/{id}/art", get(art))
+        .route("/episodes/{id}/art", get(episode_art))
         .route("/rescan", post(rescan))
         .with_state(state)
 }
@@ -192,7 +199,7 @@ async fn item(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Js
         .map(|e| {
             json!({
                 "id": e.id, "season": e.season, "episode": e.episode, "title": e.title,
-                "aired": e.aired, "watched": e.watched, "position": e.position, "duration": e.duration,
+                "aired": e.aired, "watched": e.watched, "position": e.position, "duration": e.duration, "has_art": e.art.is_some(),
             })
         })
         .collect();
@@ -247,7 +254,15 @@ async fn art(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Res
         .expect("store lock poisoned")
         .item(&id)?
         .ok_or_else(|| not_found("item"))?;
-    let path = PathBuf::from(item.art.ok_or_else(|| not_found("artwork"))?);
+    serve_image(PathBuf::from(item.art.ok_or_else(|| not_found("artwork"))?)).await
+}
+
+async fn episode_art(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Response> {
+    let art = s.store.lock().expect("store lock poisoned").episode_art(&id)?;
+    serve_image(PathBuf::from(art.ok_or_else(|| not_found("artwork"))?)).await
+}
+
+async fn serve_image(path: PathBuf) -> ApiResult<Response> {
     let bytes = tokio::fs::read(&path).await.map_err(|e| {
         tracing::warn!(path = %path.display(), error = %e, "artwork unreadable");
         not_found("artwork")

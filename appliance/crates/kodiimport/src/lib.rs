@@ -169,6 +169,7 @@ mod tests {
             aired: None,
             date_source: DateSource::None,
             path: path.into(),
+            art: None,
         };
         let mut s = Store::open_in_memory().unwrap();
         s.apply_scan(&Scan {
