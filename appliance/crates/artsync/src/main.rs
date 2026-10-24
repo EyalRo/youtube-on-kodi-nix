@@ -47,12 +47,14 @@ fn main() -> ExitCode {
     };
     tracing::info!(without_art = items.len(), tmdb = cfg.tmdb_key.is_some(), "artsync starting");
     let s = run(&cfg, &items);
+    let episodes = artsync::run_episodes(&cfg, &items);
     tracing::info!(
         wanted = s.wanted, fetched = s.fetched, no_artwork_found = s.missed,
         failed = s.failed,
+        episode_thumbnails = episodes,
         "artsync finished"
     );
-    if s.fetched > 0
+    if s.fetched + episodes > 0
         && let Err(e) = notify_rescan(&cfg.mediad)
     {
         tracing::warn!(error = %e, "could not ask mediad to rescan; it will pick the artwork up on its next timed scan");

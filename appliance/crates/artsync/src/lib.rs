@@ -35,6 +35,7 @@ pub struct Item {
     pub title: String,
     pub year: Option<String>,
     pub system: Option<String>,
+    pub has_art: bool,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -46,6 +47,20 @@ pub struct Summary {
 }
 
 // ---- pure helpers -------------------------------------------------------------------------
+
+/// `"The Way Home (2023)"` -> (`"The Way Home"`, `Some("2023")`): folder names carry the year to
+/// tell remakes apart, but no source lists a title that way.
+pub fn split_year(title: &str) -> (String, Option<String>) {
+    let t = title.trim();
+    if let Some(open) = t.rfind(" (")
+        && let Some(y) = t[open + 2..].strip_suffix(')')
+        && y.len() == 4
+        && y.chars().all(|c| c.is_ascii_digit())
+    {
+        return (t[..open].trim().to_string(), Some(y.to_string()));
+    }
+    (t.to_string(), None)
+}
 
 pub fn percent_encode(s: &str) -> String {
     let mut out = String::new();
@@ -223,13 +238,16 @@ pub fn list_items(addr: &str) -> Result<Vec<Item>, String> {
         .as_array()
         .ok_or("no items")?
         .iter()
-        .filter(|i| i["art"].is_null())
-        .map(|i| Item {
+        .map(|i| {
+            let (title, title_year) = split_year(i["title"].as_str().unwrap_or_default());
+            Item {
             id: i["id"].as_str().unwrap_or_default().to_string(),
             kind: i["kind"].as_str().unwrap_or_default().to_string(),
-            title: i["title"].as_str().unwrap_or_default().to_string(),
-            year: i["date"].as_str().and_then(|d| d.get(..4)).map(str::to_string),
+            title,
+            year: title_year.or_else(|| i["date"].as_str().and_then(|d| d.get(..4)).map(str::to_string)),
             system: i["system"].as_str().map(str::to_string),
+            has_art: !i["art"].is_null(),
+            }
         })
         .collect())
 }
@@ -442,6 +460,7 @@ fn lookup(cfg: &Config, listings: &mut std::collections::HashMap<String, Vec<Str
 
 pub fn run(cfg: &Config, items: &[Item]) -> Summary {
     let mut sum = Summary::default();
+    let items: Vec<&Item> = items.iter().filter(|i| !i.has_art).collect();
     let _ = std::fs::create_dir_all(&cfg.cache);
     let mut listings = std::collections::HashMap::new();
     let mut lookups = 0;
@@ -479,9 +498,116 @@ pub fn run(cfg: &Config, items: &[Item]) -> Summary {
     sum
 }
 
+/// `(season, number) -> image URL` from TVmaze's episode list of a show.
+pub fn tvmaze_episode_images(body: &Value) -> std::collections::HashMap<(i64, i64), String> {
+    body.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            Some((
+                (e["season"].as_i64()?, e["number"].as_i64()?),
+                e["image"]["original"].as_str()?.to_string(),
+            ))
+        })
+        .collect()
+}
+
+/// Episodes of a library show as mediad lists them: `(episode id, season, number, has thumbnail)`.
+fn show_episodes(addr: &str, id: &str) -> Result<Vec<(String, i64, i64, bool)>, String> {
+    let (status, body) = http(addr, "GET", &format!("/items/{id}"))?;
+    if status != 200 {
+        return Err(format!("/items/{id}: HTTP {status}"));
+    }
+    let v: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+    Ok(v["episodes"]
+        .as_array()
+        .ok_or("no episodes")?
+        .iter()
+        .map(|e| {
+            (
+                e["id"].as_str().unwrap_or_default().to_string(),
+                e["season"].as_i64().unwrap_or(0),
+                e["episode"].as_i64().unwrap_or(0),
+                e["has_art"].as_bool().unwrap_or(false),
+            )
+        })
+        .collect())
+}
+
+/// Episode thumbnails for TV shows, from TVmaze, cached as `<episode id>.jpg`. A show is only
+/// looked up when some episode still lacks one, and a show TVmaze does not know is not retried
+/// for a week. Returns how many thumbnails were stored.
+pub fn run_episodes(cfg: &Config, shows: &[Item]) -> usize {
+    let mut stored = 0;
+    for show in shows.iter().filter(|s| s.kind == "show") {
+        let marker = format!("{}.eps-miss", show.id);
+        let missing: Vec<_> = match show_episodes(&cfg.mediad, &show.id) {
+            Ok(eps) => eps.into_iter().filter(|e| !e.3 && !cache_hit(&cfg.cache, &e.0)).collect(),
+            Err(e) => {
+                tracing::warn!(show = %show.title, error = %e, "cannot list episodes");
+                continue;
+            }
+        };
+        if missing.is_empty() {
+            continue;
+        }
+        if std::fs::metadata(cfg.cache.join(&marker)).and_then(|m| m.modified()).ok()
+            .and_then(|t| SystemTime::now().duration_since(t).ok())
+            .is_some_and(|age| age < RETRY_MISSES_AFTER)
+        {
+            continue;
+        }
+        let found = (|| -> Result<Option<std::collections::HashMap<(i64, i64), String>>, String> {
+            let hits = get_json(&format!("https://api.tvmaze.com/search/shows?q={}", percent_encode(&show.title)))?;
+            let Some(tv_id) = hits.as_array().into_iter().flatten().find_map(|r| {
+                same_title(r["show"]["name"].as_str()?, &show.title).then(|| r["show"]["id"].as_i64())?
+            }) else {
+                return Ok(None);
+            };
+            Ok(Some(tvmaze_episode_images(&get_json(&format!("https://api.tvmaze.com/shows/{tv_id}/episodes"))?)))
+        })();
+        let images = match found {
+            Ok(Some(m)) => m,
+            Ok(None) => {
+                tracing::info!(show = %show.title, "show not found on TVmaze; no episode thumbnails");
+                let _ = std::fs::write(cfg.cache.join(&marker), b"");
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!(show = %show.title, error = %e, "episode lookup failed");
+                continue;
+            }
+        };
+        let mut got = 0;
+        for (id, season, number, _) in missing {
+            let Some(url) = images.get(&(season, number)) else { continue };
+            match image(url, "jpg") {
+                Ok(Found::Image(ext, bytes)) if !bytes.is_empty() => {
+                    let tmp = cfg.cache.join(format!(".{id}.part"));
+                    if std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, cfg.cache.join(format!("{id}.{ext}")))).is_ok() {
+                        got += 1;
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(show = %show.title, error = %e, "episode thumbnail failed"),
+            }
+        }
+        tracing::info!(show = %show.title, thumbnails = got, "episode thumbnails cached");
+        stored += got;
+    }
+    stored
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_years_are_split_off_titles() {
+        assert_eq!(split_year("The Way Home (2023)"), ("The Way Home".into(), Some("2023".into())));
+        assert_eq!(split_year("Alien - Earth"), ("Alien - Earth".into(), None));
+        assert_eq!(split_year("Show (Part 2)"), ("Show (Part 2)".into(), None));
+    }
 
     #[test]
     fn percent_round_trip() {
@@ -535,7 +661,7 @@ mod tests {
         std::fs::write(dir.path().join("a.jpg"), b"x").unwrap();
         std::fs::write(dir.path().join("b.miss"), b"").unwrap();
         let cfg = Config { mediad: String::new(), cache: dir.path().into(), tmdb_key: None, max_lookups: 0 };
-        let item = |id: &str, kind: &str| Item { id: id.into(), kind: kind.into(), title: "T".into(), year: None, system: None };
+        let item = |id: &str, kind: &str| Item { id: id.into(), kind: kind.into(), title: "T".into(), year: None, system: None, has_art: false };
         let sum = run(&cfg, &[item("a", "game"), item("b", "game"), item("c", "game")]);
         assert_eq!(sum.wanted, 1);
     }
