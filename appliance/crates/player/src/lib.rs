@@ -3,6 +3,7 @@
 
 pub mod http;
 pub mod ipc;
+pub mod keys;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -149,6 +150,7 @@ fn run_mpv(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         .args(mpv_args(cfg, play, &socket))
         .spawn()
         .map_err(|e| PlayError::Launch(format!("cannot start {}: {e}", cfg.mpv.display())))?;
+    keys::watch(socket.clone());
     // mpv creates the socket a moment after starting.
     let mut stream = None;
     for _ in 0..100 {
