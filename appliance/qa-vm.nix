@@ -72,6 +72,12 @@
   # Start mediad only once the library is mounted, not on an empty /media.
   systemd.services.mediad.unitConfig.RequiresMountsFor = [ "/media/movies" "/media/tv" "/media/roms" "/media/youtube" ];
 
+  # All the VM's logs (mediad, ytsync, ui, ...) to VictoriaLogs, so scan results can be checked there.
+  services.journald.upload = {
+    enable = true;
+    settings.Upload.URL = "http://192.168.0.39:9428/insert/journald";
+  };
+
   systemd.services.ui = {
     description = "Appliance UI session";
     wantedBy = [ "multi-user.target" ];
