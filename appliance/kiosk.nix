@@ -47,6 +47,21 @@ in
       description = "Extra mpv arguments, appended after the player's defaults.";
     };
 
+    # RetroArch with the MVP libretro cores (NES, SNES, Genesis/SMS/Game Gear,
+    # GB/GBC/GBA). snes9x and genesis-plus-gx are `unfreeRedistributable`, so the
+    # host config must allow unfree (nixpkgs.config.allowUnfree). Override with any
+    # `pkgs.retroarch.withCores`-style package.
+    retroarch = mkOption {
+      type = types.package;
+      default = pkgs.retroarch.withCores (cores: [
+        cores.nestopia
+        cores.snes9x
+        cores.genesis-plus-gx
+        cores.mgba
+      ]);
+      description = "RetroArch package (with libretro cores) used for game playback.";
+    };
+
     victorialogs = mkOption {
       type = types.nullOr types.str;
       default = null;
@@ -67,7 +82,7 @@ in
     systemd.services."getty@tty1".enable = false;
 
     fonts.packages = [ pkgs.noto-fonts pkgs.dejavu_fonts ];
-    environment.systemPackages = [ cfg.package pkgs.mpv pkgs.alsa-utils ];
+    environment.systemPackages = [ cfg.package cfg.retroarch pkgs.mpv pkgs.alsa-utils ];
 
     # The PAM "login" session gives the user logind access to the DRM and input devices.
     systemd.services.appliance-ui = {
@@ -76,7 +91,7 @@ in
       after = [ "systemd-user-sessions.service" "mediad.service" "sound.target" ];
       wants = [ "mediad.service" ];
       conflicts = [ "getty@tty1.service" ];
-      path = [ backend.package cfg.package pkgs.mpv pkgs.alsa-utils ];
+      path = [ backend.package cfg.package cfg.retroarch pkgs.mpv pkgs.alsa-utils ];
       environment = {
         SLINT_BACKEND = "linuxkms-software";
         SLINT_SCALE_FACTOR = cfg.scaleFactor;
@@ -87,6 +102,8 @@ in
         PLAYER_MEDIAD = backend.bind;
         PLAYER_DRM_CONNECTOR = cfg.drmConnector;
         PLAYER_AUDIO_DEVICE = cfg.audioDevice;
+        PLAYER_RETROARCH = "${cfg.retroarch}/bin/retroarch";
+        PLAYER_CORE_DIR = "${cfg.retroarch}/lib/retroarch/cores";
       } // lib.optionalAttrs (cfg.mpvExtraArgs != "") {
         PLAYER_MPV_ARGS = cfg.mpvExtraArgs;
       } // lib.optionalAttrs (cfg.victorialogs != null) {
