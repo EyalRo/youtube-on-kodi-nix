@@ -15,15 +15,51 @@ static SXXEYY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(?:^|[^a-z0-9])s(\d{1,3})e(\d{1,4})").unwrap());
 static DATED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d{4})[-.](\d{2})[-.](\d{2})").unwrap());
+/// `2x15`, `2X10`: season `x` episode.
+static SEASON_X_EP: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(?:^|[^a-z0-9])(\d{1,2})x(\d{1,4})").unwrap());
+/// `S2 - 11`: season marker then a dash then the episode.
+static S_DASH_EP: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(?:^|[^a-z0-9])s(\d{1,2})\s*-\s*(\d{1,4})").unwrap());
+/// `E05`: a single-season show's episode with no season marker. The episode must
+/// not run into an alphanumeric (handled by checking `E(\d+)` is followed by a
+/// non-alphanumeric or end of string, since `regex` has no look-around).
+static E_ONLY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(?:^|[^a-z0-9])e(\d{1,4})([^a-z0-9]|$)").unwrap());
+/// `suits0112` = S01E12: a compact 2-digit season (`0\d`, 01-09) glued to a
+/// 2-digit episode, directly after the show name. Requires the season to carry a
+/// leading zero and a non-digit before it, and a non-alphanumeric after the
+/// episode, so a 4-digit year like `2024` (or a digit-run inside a longer number)
+/// never matches. (Rust `regex` has no look-around, so the surrounding non-matching
+/// characters are matched, not looked behind/ahead.)
+static COMPACT_SXX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(?:^|[^0-9])(0\d)(\d{2})([^a-z0-9]|$)").unwrap());
 
 /// (season, episode, rest of the name after the marker)
 fn parse_episode(stem: &str) -> Option<(i32, i32, String)> {
-    let c = SXXEYY.captures(stem)?;
-    let end = c.get(0)?.end();
-    let rest = stem[end..]
-        .trim_matches(|ch: char| " -._".contains(ch))
-        .to_string();
-    Some((c[1].parse().ok()?, c[2].parse().ok()?, rest))
+    // Scene/rename forms, most explicit first. `season_group` of 0 means the
+    // pattern has no season group and it is a single-season show (E05 -> season 1).
+    for (re, season_group, episode_group) in [
+        (&*SXXEYY, 1, 2),      // S02E03
+        (&*SEASON_X_EP, 1, 2), // 2x15
+        (&*S_DASH_EP, 1, 2),   // S2 - 11
+        (&*E_ONLY, 0, 1),      // E05
+        (&*COMPACT_SXX, 1, 2), // suits0112
+    ] {
+        let Some(c) = re.captures(stem) else { continue };
+        let season = if season_group == 0 {
+            1
+        } else {
+            c.get(season_group)?.as_str().parse().ok()?
+        };
+        let episode = c.get(episode_group)?.as_str().parse().ok()?;
+        let end = c.get(0)?.end();
+        let rest = stem[end..]
+            .trim_matches(|ch: char| " -._".contains(ch))
+            .to_string();
+        return Some((season, episode, rest));
+    }
+    None
 }
 
 fn episode_date(file: &Path, stem: &str) -> (Option<NaiveDate>, DateSource) {
@@ -121,6 +157,40 @@ pub fn scan(media_root: &Path) -> Scan {
 mod tests {
     use super::*;
     use std::fs::{create_dir_all, write};
+
+    #[test]
+    fn parses_non_standard_scene_names() {
+        // 2xNN / 2X15
+        assert_eq!(
+            parse_episode("Servant.2x10.Josephine").map(|t| (t.0, t.1)),
+            Some((2, 10))
+        );
+        assert_eq!(
+            parse_episode("The Pitt 2X15").map(|t| (t.0, t.1)),
+            Some((2, 15))
+        );
+        // S2 - 11
+        assert_eq!(
+            parse_episode("[SubsPlease] Goblin Slayer S2 - 11 (720p)").map(|t| (t.0, t.1)),
+            Some((2, 11))
+        );
+        // E05 single season
+        assert_eq!(
+            parse_episode("Bubblegum.Crisis.E05.1080p.BluRay").map(|t| (t.0, t.1)),
+            Some((1, 5))
+        );
+        // compact S01Exx directly after the show name
+        assert_eq!(
+            parse_episode("unveil-suits0112-1080p").map(|t| (t.0, t.1)),
+            Some((1, 12))
+        );
+        assert_eq!(
+            parse_episode("unveil-suits0107-1080p").map(|t| (t.0, t.1)),
+            Some((1, 7))
+        );
+        // a 4-digit year must never match the compact form
+        assert!(parse_episode("Something2012").is_none());
+    }
 
     #[test]
     fn parses_sonarr_style_names() {
