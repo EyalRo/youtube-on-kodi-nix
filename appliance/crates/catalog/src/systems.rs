@@ -13,6 +13,10 @@ pub struct System {
     pub folder_exts: &'static [&'static str],
     /// Folder names (letters and digits only, lower case) that mean this system.
     pub aliases: &'static [&'static str],
+    /// Whether the player has a libretro core for this system (see `player::core_for`).
+    /// Games of a non-playable system are still scanned and stored, but hidden from
+    /// every row until a core exists (N64 is post-MVP).
+    pub playable: bool,
 }
 
 pub const SYSTEMS: &[System] = &[
@@ -22,6 +26,7 @@ pub const SYSTEMS: &[System] = &[
         exts: &["nes", "unf", "unif"],
         folder_exts: &[],
         aliases: &["nes", "famicom", "nintendo", "nintendoentertainmentsystem"],
+        playable: true,
     },
     System {
         id: "snes",
@@ -29,6 +34,7 @@ pub const SYSTEMS: &[System] = &[
         exts: &["sfc", "smc"],
         folder_exts: &["swc", "fig"],
         aliases: &["snes", "supernintendo", "superfamicom", "supernes"],
+        playable: true,
     },
     System {
         id: "genesis",
@@ -36,6 +42,7 @@ pub const SYSTEMS: &[System] = &[
         exts: &["md", "gen", "smd"],
         folder_exts: &["bin"],
         aliases: &["genesis", "megadrive", "segagenesis", "segamegadrive"],
+        playable: true,
     },
     System {
         id: "sms",
@@ -43,6 +50,7 @@ pub const SYSTEMS: &[System] = &[
         exts: &["sms"],
         folder_exts: &[],
         aliases: &["sms", "mastersystem", "segamastersystem"],
+        playable: true,
     },
     System {
         id: "gamegear",
@@ -50,6 +58,7 @@ pub const SYSTEMS: &[System] = &[
         exts: &["gg"],
         folder_exts: &[],
         aliases: &["gg", "gamegear", "segagamegear"],
+        playable: true,
     },
     System {
         id: "gb",
@@ -57,6 +66,7 @@ pub const SYSTEMS: &[System] = &[
         exts: &["gb"],
         folder_exts: &[],
         aliases: &["gb", "gameboy"],
+        playable: true,
     },
     System {
         id: "gbc",
@@ -64,6 +74,7 @@ pub const SYSTEMS: &[System] = &[
         exts: &["gbc"],
         folder_exts: &[],
         aliases: &["gbc", "gameboycolor"],
+        playable: true,
     },
     System {
         id: "gba",
@@ -71,6 +82,7 @@ pub const SYSTEMS: &[System] = &[
         exts: &["gba"],
         folder_exts: &[],
         aliases: &["gba", "gameboyadvance"],
+        playable: true,
     },
     System {
         id: "n64",
@@ -78,6 +90,7 @@ pub const SYSTEMS: &[System] = &[
         exts: &["z64", "n64", "v64"],
         folder_exts: &[],
         aliases: &["n64", "nintendo64"],
+        playable: false,
     },
 ];
 

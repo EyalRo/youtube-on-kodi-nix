@@ -21,6 +21,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "applog"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+]
+
+[[package]]
 name = "artsync"
 version = "0.1.0"
 dependencies = [
@@ -495,6 +502,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 name = "mediad"
 version = "0.1.0"
 dependencies = [
+ "applog",
  "axum",
  "catalog",
  "scanner",
@@ -577,6 +585,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 name = "player"
 version = "0.1.0"
 dependencies = [
+ "applog",
  "serde_json",
  "tempfile",
  "thiserror",
@@ -827,6 +836,7 @@ dependencies = [
 name = "store"
 version = "0.1.0"
 dependencies = [
+ "applog",
  "catalog",
  "chrono",
  "rusqlite",

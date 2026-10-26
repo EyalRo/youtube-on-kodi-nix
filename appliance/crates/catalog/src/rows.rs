@@ -37,7 +37,7 @@ struct RowDef {
 
 fn matches(row_id: &str, item: &Item) -> bool {
     match row_id {
-        "everything" => true,
+        "everything" => item.kind != Kind::Game || playable_game(item),
         "movies" => item.kind == Kind::Movie,
         "tvshows" => item.kind == Kind::Show,
         "channels" => item.kind == Kind::Channel,
@@ -46,12 +46,24 @@ fn matches(row_id: &str, item: &Item) -> bool {
                 && item.watched > 0
                 && item.unwatched_date.is_some()
         }
-        "games" => item.kind == Kind::Game,
+        "games" => playable_game(item),
         other => match other.strip_prefix("games:") {
-            Some(system) => item.kind == Kind::Game && item.system.as_deref() == Some(system),
+            Some(system) => playable_game(item) && item.system.as_deref() == Some(system),
             None => false,
         },
     }
+}
+
+/// A game counts only if its system has a libretro core today. Games of a system
+/// without one (N64) are scanned and stored but hidden from every row until a core
+/// is added — otherwise the UI offers games that cannot be launched.
+fn playable_game(item: &Item) -> bool {
+    item.kind == Kind::Game
+        && item
+            .system
+            .as_deref()
+            .and_then(system_by_id)
+            .is_some_and(|s| s.playable)
 }
 
 fn label_of(id: &str) -> &'static str {
@@ -82,7 +94,7 @@ fn definitions(items: &[Item]) -> Vec<RowDef> {
         .collect();
     let mut systems: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Kind::Game)
+        .filter(|i| playable_game(i))
         .filter_map(|i| i.system.as_deref())
         .collect();
     systems.sort_by_key(|s| system_by_id(s).map_or(*s, |sys| sys.name));
@@ -300,5 +312,31 @@ mod tests {
         assert_eq!(count("movies"), 3);
         assert_eq!(count("games"), 3);
         assert_eq!(count("unwatched"), 1);
+    }
+
+    #[test]
+    fn non_playable_games_are_hidden_from_rows_and_everything() {
+        // N64 has no libretro core yet (post-MVP): it is scanned and stored, but
+        // must not appear in any row, or the UI would offer games that cannot launch.
+        let c = vec![
+            game("GoldenEye", "n64", d(1997, 8, 25)),
+            game("Aidyn", "n64", None),
+            game("Zelda", "nes", d(1987, 1, 1)),
+        ];
+        let rows = list_rows(&c);
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert!(!ids.contains(&"games:n64"), "no row for a system without a core");
+        assert!(
+            !ids.contains(&"games") || rows.iter().find(|r| r.id == "games").unwrap().count == 1,
+            "games row holds only playable games"
+        );
+        // The N64 games are absent from the games and everything rows.
+        for row in &rows {
+            for item in build_row(&row.id, &c).unwrap() {
+                assert_ne!(item.system.as_deref(), Some("n64"));
+            }
+        }
+        // They remain in the underlying catalog (scanning keeps them for later).
+        assert_eq!(c.iter().filter(|i| i.system.as_deref() == Some("n64")).count(), 2);
     }
 }
