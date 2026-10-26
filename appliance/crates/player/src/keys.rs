@@ -46,6 +46,15 @@ fn send(socket: &PathBuf, command: &Value) {
     }
 }
 
+/// mpv's OSC bar hides after a timeout and shows on user interaction. IPC commands
+/// sent by this player (seek/pause) do not count as user input, so nudge the bar
+/// visible with the message the OSC script listens for (`script-message-to osc
+/// osc-visibility auto`).
+fn wake_osd(socket: &PathBuf) {
+    let show = json!({ "command": ["script-message-to", "osc", "osc-visibility", "auto"] });
+    send(socket, &show);
+}
+
 /// Start one reader per input device; each lives until the player process exits.
 pub fn watch(socket: PathBuf) {
     let Ok(dir) = std::fs::read_dir("/dev/input") else { return };
@@ -71,6 +80,7 @@ pub fn watch(socket: PathBuf) {
                     applog::debug!(code, repeat, command = ?cmd, "key during playback");
                     if let Some(cmd) = cmd {
                         send(&socket, &cmd);
+                        wake_osd(&socket);
                     }
                 }
             }
