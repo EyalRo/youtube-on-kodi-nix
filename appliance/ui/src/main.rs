@@ -1,4 +1,4 @@
-//! Spike: poster rows from mediad, drawn by Slint straight to DRM/KMS, driven by key events.
+//! Spike: poster rows from mediad, drawn by Slint straight to DRM/KMS, driven by the remote.
 //!
 //! Choosing an item hands the display to `play`. Two ways, selected by `UI_HANDOFF`:
 //! `exit` (default) saves the focus, writes the item id to `$UI_STATE/launch` and exits 10 so a
@@ -380,7 +380,7 @@ fn tick_wav() -> Vec<u8> {
 }
 
 /// Plays the tick through `UI_TICK_PLAYER` (default `aplay -q`). A tick that arrives while the
-/// previous one is still playing is dropped, so holding an arrow key cannot pile up processes.
+/// previous one is still playing is dropped, so holding a direction cannot pile up processes.
 /// `UI_TICK=off` silences it.
 fn tick_player() -> Option<impl FnMut()> {
     if env_or("UI_TICK", "on") == "off" {
@@ -409,6 +409,66 @@ fn tick_player() -> Option<impl FnMut()> {
             .map_err(|e| tracing::warn!(error = %e, "cannot play the tick"))
             .ok();
     })
+}
+
+/// Back and home on the remote. The key mapping delivers them as an empty key (text "\0"), the
+/// same for every button it does not know, so read the kernel's input events as the player does.
+/// Codes: KEY_BACK 158, KEY_HOMEPAGE 172.
+fn watch_remote(ui: slint::Weak<App>) {
+    use std::sync::Mutex;
+    const KEY_BACK: u16 = 158;
+    const KEY_HOMEPAGE: u16 = 172;
+    // The remote shows up as several devices; one press must act once.
+    static LAST: Mutex<[Option<std::time::Instant>; 2]> = Mutex::new([None, None]);
+    let Ok(dir) = std::fs::read_dir("/dev/input") else {
+        tracing::warn!("cannot list /dev/input; the remote's back and home buttons will not work");
+        return;
+    };
+    for path in dir.filter_map(Result::ok).map(|e| e.path()) {
+        if !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("event")) {
+            continue;
+        }
+        let mut dev = match std::fs::File::open(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(device = %path.display(), error = %e, "cannot open an input device");
+                continue;
+            }
+        };
+        debug_log!(device = %path.display(), "watching an input device for the back and home buttons");
+        let ui = ui.clone();
+        std::thread::spawn(move || {
+            let mut ev = [0u8; 24];
+            while dev.read_exact(&mut ev).is_ok() {
+                let (kind, code, value) = (
+                    u16::from_le_bytes([ev[16], ev[17]]),
+                    u16::from_le_bytes([ev[18], ev[19]]),
+                    i32::from_le_bytes([ev[20], ev[21], ev[22], ev[23]]),
+                );
+                if kind != 1 || value != 1 {
+                    continue; // button presses only
+                }
+                debug_log!(code, "input device button press");
+                let slot = match code {
+                    KEY_BACK => 0,
+                    KEY_HOMEPAGE => 1,
+                    _ => continue,
+                };
+                {
+                    let mut last = LAST.lock().unwrap();
+                    if last[slot].is_some_and(|t| t.elapsed() < Duration::from_millis(250)) {
+                        continue;
+                    }
+                    last[slot] = Some(std::time::Instant::now());
+                }
+                tracing::info!(button = if slot == 0 { "back" } else { "home" }, "remote button");
+                let _ = ui.upgrade_in_event_loop(move |ui| {
+                    if slot == 0 { ui.invoke_go_back() } else { ui.invoke_go_home() }
+                });
+            }
+            tracing::warn!(device = %path.display(), "input device closed");
+        });
+    }
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -472,9 +532,9 @@ fn main() -> Result<(), slint::PlatformError> {
     #[cfg(appliance_debug)]
     ui.on_key_debug(|text| {
         let codes: Vec<u32> = text.chars().map(u32::from).collect();
-        tracing::debug!(?codes, "key reached the UI");
+        tracing::debug!(?codes, "remote button reached the UI");
     });
-    ui.on_arm(|action| power_event("armed", action.as_str(), "press Enter again within 3 s to confirm"));
+    ui.on_arm(|action| power_event("armed", action.as_str(), "press select again within 3 s to confirm"));
     ui.on_disarm(|action, why| power_event("cancelled", action.as_str(), why.as_str()));
     ui.on_power(|action| {
         power_event("requested", action.as_str(), "confirmed on the remote");
@@ -562,6 +622,7 @@ fn main() -> Result<(), slint::PlatformError> {
             *page.borrow_mut() = open_detail(&ui, &mediad, id, s, e, &cache.join("episodes"));
         }
     }
+    watch_remote(ui.as_weak());
     ui.run()?;
     if LAUNCH.load(std::sync::atomic::Ordering::SeqCst) {
         std::process::exit(EXIT_LAUNCH);

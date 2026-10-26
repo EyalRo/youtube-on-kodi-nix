@@ -6,7 +6,7 @@ while :; do
     appliance-ui
     rc=$?
     if [ "$rc" -eq 10 ] && [ -s "$state/launch" ]; then
-        play "$(cat "$state/launch")"
+        "${UI_PLAY:-play}" "$(cat "$state/launch")"
         continue
     fi
     exit "$rc"

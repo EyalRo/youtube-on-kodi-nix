@@ -81,7 +81,8 @@ in
         SLINT_BACKEND = "linuxkms-software";
         SLINT_SCALE_FACTOR = cfg.scaleFactor;
         UI_HANDOFF = "exit";
-        UI_PLAY = "play";
+        # Absolute: the PAM login session resets PATH, so the unit's `path` never reaches the script.
+        UI_PLAY = "${backend.package}/bin/play";
         UI_MEDIAD = backend.bind;
         PLAYER_MEDIAD = backend.bind;
         PLAYER_DRM_CONNECTOR = cfg.drmConnector;

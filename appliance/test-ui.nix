@@ -71,7 +71,7 @@ pkgs.testers.runNixOSTest {
         # A blank or text-console frame compresses to a few KB; a drawn UI does not.
         assert os.path.getsize(os.path.join(machine.out_dir, "ui-1-initial.png")) > 20000
 
-    with subtest("arrow keys move the focus"):
+    with subtest("directions move the focus"):
         for k in ["right", "right", "down"]:
             machine.send_key(k)
             machine.sleep(1)
@@ -127,9 +127,13 @@ pkgs.testers.runNixOSTest {
         machine.screenshot("ui-6-back-on-page")
         saved = machine.succeed("cat /tmp/appliance-ui/detail")
         assert saved.split()[1:] == ["1", "0"], saved + ui_log()
+        # Back climbs one level at a time: episodes -> season tabs -> the show list.
         machine.send_key("esc")
         machine.sleep(1)
-        assert machine.execute("test -e /tmp/appliance-ui/detail")[0] != 0, ui_log()
+        assert machine.execute("test -e /tmp/appliance-ui/detail")[0] == 0, "first back left the page: " + ui_log()
+        machine.send_key("esc")
+        machine.sleep(1)
+        assert machine.execute("test -e /tmp/appliance-ui/detail")[0] != 0, "second back stayed on the page: " + ui_log()
         # Back to movies only, so the next subtest's first tile is a movie again.
         machine.succeed("rm -rf /media/tv/*")
         machine.succeed(f"curl -sf -XPOST {API}/rescan")

@@ -103,10 +103,10 @@ export component App inherits Window {
     callback season-changed(int);
     callback play-episode(int);
     callback back();
-    // Debug builds log every key the UI receives (the text of the key event).
+    // Debug builds log every remote button the UI receives (the text of the key event).
     callback key-debug(string);
     // sel-row == -1 puts the focus on the top bar; bar-sel picks the button (0 settings, 1 reboot,
-    // 2 shutdown). Reboot and shutdown need a second Enter ("armed") within 3 s.
+    // 2 shutdown). Reboot and shutdown need a second select ("armed") within 3 s.
     in-out property <int> bar-sel: 0;
     property <int> armed: -1;
     property <string> notice;
@@ -122,44 +122,96 @@ export component App inherits Window {
         sel-col = max(0, min(sel-col, rows[sel-row].tiles.length - 1));
     }
 
+    // True while the top bar (settings, reboot, shutdown) has the focus, on either screen.
+    property <bool> on-bar: detail ? detail-focus < 0 : sel-row < 0;
+
+    // Back goes up one level: episodes -> season tabs -> the show list; from the top bar it
+    // returns to the page below it. On the show list there is nowhere further up.
+    public function go-back() {
+        disarm-power("button");
+        if (detail) {
+            if (detail-focus == 1) { detail-focus = 0; moved(); }
+            else if (detail-focus < 0) { detail-focus = 0; moved(); }
+            else { back(); moved(); }
+        } else if (sel-row < 0) {
+            if (rows.length > 0) { sel-row = 0; clamp-col(); moved(); }
+        }
+    }
+
+    // Home goes to the top of the tree: out of any show page, onto the first row.
+    public function go-home() {
+        disarm-power("button");
+        if (detail) { back(); }
+        sel-row = rows.length > 0 ? 0 : -1;
+        sel-col = 0;
+        moved();
+    }
+
+    function disarm-power(why: string) {
+        if (armed >= 0) { disarm(armed == 1 ? "reboot" : "poweroff", why); }
+        armed = -1;
+    }
+
+    function bar-move(step: int) {
+        if (bar-sel + step >= 0 && bar-sel + step <= 2) { bar-sel += step; moved(); }
+    }
+
+    function bar-activate() {
+        if (bar-sel == 0) {
+            notice = "Settings are not built yet";
+            notice-timer.running = true;
+            config();
+        } else if (armed == bar-sel) {
+            armed = -1;
+            power(bar-sel == 1 ? "reboot" : "poweroff");
+        } else {
+            armed = bar-sel;
+            arm(bar-sel == 1 ? "reboot" : "poweroff");
+            arm-timer.running = true;
+        }
+    }
+
     fs := FocusScope {
         key-pressed(e) => {
             key-debug(e.text);
+            // Reboot and shutdown need a second select; any other button cancels.
+            if (e.text != Key.Return && armed >= 0) { disarm-power("button"); }
+            if (e.text == Key.Home) { go-home(); return accept; }
+            if (e.text == Key.Backspace) { go-back(); return accept; }
             if (detail) {
                 if (e.text == Key.LeftArrow) {
-                    if (detail-focus == 0) {
+                    if (on-bar) { bar-move(-1); }
+                    else if (detail-focus == 0) {
                         if (sel-season > 0) { sel-season -= 1; season-changed(sel-season); moved(); }
                     } else if (sel-ep > 0) { sel-ep -= 1; moved(); }
                 } else if (e.text == Key.RightArrow) {
-                    if (detail-focus == 0) {
+                    if (on-bar) { bar-move(1); }
+                    else if (detail-focus == 0) {
                         if (sel-season < seasons.length - 1) { sel-season += 1; season-changed(sel-season); moved(); }
                     } else if (sel-ep < episodes.length - 1) { sel-ep += 1; moved(); }
                 } else if (e.text == Key.DownArrow) {
-                    if (detail-focus == 0 && episodes.length > 0) { detail-focus = 1; moved(); }
+                    if (on-bar) { detail-focus = 0; moved(); }
+                    else if (detail-focus == 0 && episodes.length > 0) { detail-focus = 1; moved(); }
                 } else if (e.text == Key.UpArrow) {
                     if (detail-focus == 1) { detail-focus = 0; moved(); }
+                    else if (detail-focus == 0) { detail-focus = -1; moved(); }
                 } else if (e.text == Key.Return) {
-                    if (detail-focus == 1) { play-episode(sel-ep); }
+                    if (on-bar) { bar-activate(); }
+                    else if (detail-focus == 1) { play-episode(sel-ep); }
                     else if (episodes.length > 0) { detail-focus = 1; moved(); }
-                } else if (e.text == Key.Escape || e.text == Key.Backspace) {
-                    back();
+                } else if (e.text == Key.Escape) {
+                    go-back();
                 } else {
                     return reject;
                 }
                 return accept;
             }
-            if (e.text != Key.Return) {
-                if (armed >= 0) { disarm(armed == 1 ? "reboot" : "poweroff", "key"); }
-                armed = -1;
-            }
             if (e.text == Key.RightArrow) {
-                if (sel-row < 0) {
-                    if (bar-sel < 2) { bar-sel += 1; moved(); }
-                } else if (sel-col < rows[sel-row].tiles.length - 1) { sel-col += 1; moved(); }
+                if (sel-row < 0) { bar-move(1); }
+                else if (sel-col < rows[sel-row].tiles.length - 1) { sel-col += 1; moved(); }
             } else if (e.text == Key.LeftArrow) {
-                if (sel-row < 0) {
-                    if (bar-sel > 0) { bar-sel -= 1; moved(); }
-                } else if (sel-col > 0) { sel-col -= 1; moved(); }
+                if (sel-row < 0) { bar-move(-1); }
+                else if (sel-col > 0) { sel-col -= 1; moved(); }
             } else if (e.text == Key.DownArrow) {
                 if (sel-row < 0) {
                     if (rows.length > 0) { sel-row = 0; clamp-col(); moved(); }
@@ -167,20 +219,7 @@ export component App inherits Window {
             } else if (e.text == Key.UpArrow) {
                 if (sel-row >= 0) { sel-row -= 1; moved(); }
             } else if (e.text == Key.Return) {
-                if (sel-row >= 0) {
-                    activate(sel-row, sel-col);
-                } else if (bar-sel == 0) {
-                    notice = "Settings are not built yet";
-                    notice-timer.running = true;
-                    config();
-                } else if (armed == bar-sel) {
-                    armed = -1;
-                    power(bar-sel == 1 ? "reboot" : "poweroff");
-                } else {
-                    armed = bar-sel;
-                    arm(bar-sel == 1 ? "reboot" : "poweroff");
-                    arm-timer.running = true;
-                }
+                if (sel-row >= 0) { activate(sel-row, sel-col); } else { bar-activate(); }
             } else if (e.text == Key.Escape) {
                 quit();
             } else {
@@ -250,18 +289,18 @@ export component App inherits Window {
             height: 60px;
             spacing: 16px;
             BarButton {
-                focused: sel-row < 0 && bar-sel == 0;
+                focused: on-bar && bar-sel == 0;
                 // sliders
                 commands: "M4 7 H6 M10 7 H20 M8 7 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M4 12 H14 M18 12 H20 M16 12 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M4 17 H8 M12 17 H20 M10 17 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0";
             }
             BarButton {
-                focused: sel-row < 0 && bar-sel == 1;
+                focused: on-bar && bar-sel == 1;
                 armed: armed == 1;
                 // circular arrow
                 commands: "M20 12 A8 8 0 1 1 17.66 6.34 M20 3.5 V8.5 H15";
             }
             BarButton {
-                focused: sel-row < 0 && bar-sel == 2;
+                focused: on-bar && bar-sel == 2;
                 armed: armed == 2;
                 // power
                 commands: "M12 3 V12 M7.2 6.2 A8 8 0 1 0 16.8 6.2";

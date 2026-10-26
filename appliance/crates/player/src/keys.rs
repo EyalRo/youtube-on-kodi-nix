@@ -1,4 +1,4 @@
-//! Keys and remote buttons while a video plays.
+//! Remote buttons while a video plays.
 //!
 //! mpv on the bare display has no terminal and no window system, so it hears nothing from the
 //! keyboard. Instead the player reads the kernel's input devices (`/dev/input/event*`, which
@@ -19,9 +19,9 @@ pub fn command_for(code: u16, repeat: bool) -> Option<Value> {
     // Only seeking repeats while a key is held; stop and pause fire once per press.
     let seek = |secs: i32| Some(json!({ "command": ["seek", secs, "relative"] }));
     match code {
-        // ESC, BACKSPACE, Q, BACK, STOP, STOPCD
+        // back (BACK, ESC, BACKSPACE), STOP, STOPCD, Q
         1 | 14 | 16 | 158 | 128 | 166 if !repeat => Some(json!({ "command": ["quit"] })),
-        // SPACE, ENTER, PLAYPAUSE, PLAY, PAUSE
+        // select (ENTER), SPACE, PLAYPAUSE, PLAY, PAUSE
         57 | 28 | 164 | 207 | 119 if !repeat => Some(json!({ "command": ["cycle", "pause"] })),
         105 | 168 => seek(-10), // LEFT, REWIND
         106 | 208 => seek(30),  // RIGHT, FASTFORWARD
