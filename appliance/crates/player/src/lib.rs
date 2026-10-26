@@ -70,14 +70,16 @@ pub struct Config {
 }
 
 /// The libretro core for a system, by file stem (matches the `<core>_libretro.so`
-/// nixpkgs installs; see `kiosk.nix`). mupen64plus-next is the N64 core.
+/// nixpkgs installs; see `kiosk.nix`). mupen64plus-next is the N64 core; nixpkgs
+/// names its `.so` with underscores (`mupen64plus_next_libretro.so`), so the stem
+/// uses `_` too.
 pub fn core_for(system: &str) -> Option<&'static str> {
     Some(match system {
         "nes" => "nestopia",
         "snes" => "snes9x",
         "genesis" | "sms" | "gamegear" => "genesis_plus_gx",
         "gb" | "gbc" | "gba" => "mgba",
-        "n64" => "mupen64plus-next",
+        "n64" => "mupen64plus_next",
         _ => return None,
     })
 }
@@ -367,7 +369,7 @@ mod tests {
                 "--video-driver=drm",
                 "--fullscreen",
                 "-L",
-                "/cores/mupen64plus-next_libretro.so",
+                "/cores/mupen64plus_next_libretro.so",
                 "--",
                 "/media/movies/Alien.mkv"
             ]
