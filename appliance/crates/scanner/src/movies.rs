@@ -41,6 +41,42 @@ fn main_video(dir: &Path) -> Option<std::path::PathBuf> {
     best.map(|(_, p)| p)
 }
 
+/// A compact summary of a folder's immediate contents (up to 20 entries), for the
+/// "no video file" warning so the next scan says what is actually there instead of
+/// just that a movie is missing.
+fn describe_contents(dir: &Path) -> String {
+    let mut parts: Vec<String> = fs::read_dir(dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|e| !file_name(&e.path()).starts_with('.'))
+        .map(|e| {
+            if e.path().is_dir() {
+                format!("{}/", file_name(&e.path()))
+            } else {
+                let name = file_name(&e.path());
+                match e.path().extension().and_then(|x| x.to_str()) {
+                    Some(ext) => format!("{name} ({ext})"),
+                    None => name,
+                }
+            }
+        })
+        .collect();
+    parts.sort();
+    let more = parts.len().saturating_sub(20);
+    parts.truncate(20);
+    let mut s = parts.join(", ");
+    if more > 0 {
+        s.push_str(&format!(", +{more} more"));
+    }
+    if s.is_empty() {
+        "empty".to_string()
+    } else {
+        s
+    }
+}
+
 fn nfo_date(dir: &Path) -> Option<NaiveDate> {
     let mut nfos: Vec<_> = fs::read_dir(dir)
         .ok()?
@@ -62,8 +98,9 @@ pub fn scan(media_root: &Path) -> Scan {
         let name = file_name(&dir);
         let Some(video) = main_video(&dir) else {
             scan.warnings.push(format!(
-                "movie folder without a video file: {}",
-                dir.display()
+                "movie folder without a video file: {} ({})",
+                dir.display(),
+                describe_contents(&dir)
             ));
             continue;
         };
@@ -177,10 +214,28 @@ mod tests {
     #[test]
     fn folders_without_video_are_reported_not_listed() {
         let m = media();
-        create_dir_all(m.path().join("movies/Empty (2000)")).unwrap();
+        let d = m.path().join("movies/Empty (2000)");
+        create_dir_all(&d).unwrap();
+        write(d.join("poster.jpg"), b"x").unwrap();
+        write(d.join("movie.nfo"), b"x").unwrap();
         let s = scan(m.path());
         assert!(s.entries.is_empty());
         assert_eq!(s.warnings.len(), 1);
+        assert!(s.warnings[0].contains("poster.jpg (jpg)"));
+        assert!(s.warnings[0].contains("movie.nfo (nfo)"));
+    }
+
+    #[test]
+    fn describe_contents_marks_subdirectories_and_caps_the_list() {
+        let m = media();
+        let d = m.path().join("movies/Folder (2000)");
+        create_dir_all(&d).unwrap();
+        write(d.join("a.iso"), b"x").unwrap(); // not a recognised video ext
+        create_dir_all(d.join("BDMV")).unwrap();
+        let s = scan(m.path());
+        assert!(s.entries.is_empty());
+        assert!(s.warnings[0].contains("BDMV/"));
+        assert!(s.warnings[0].contains("a.iso (iso)"));
     }
 
     #[test]
