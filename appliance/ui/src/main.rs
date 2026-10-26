@@ -512,7 +512,9 @@ fn watch_remote(ui: slint::Weak<App>) {
     use std::sync::Mutex;
     const KEY_BACK: u16 = 158;
     const KEY_HOMEPAGE: u16 = 172;
-    const KEY_MENU: u16 = 139;
+    // Menu-type keys remotes send: KEY_MENU 139, KEY_SETUP 141, KEY_COMPOSE 127, KEY_OPTION 357,
+    // KEY_INFO 358, KEY_CONTEXT_MENU 438.
+    const MENU_KEYS: [u16; 6] = [139, 141, 127, 357, 358, 438];
     // The remote shows up as several devices; one press must act once.
     static LAST: Mutex<[Option<std::time::Instant>; 3]> = Mutex::new([None, None, None]);
     let Ok(dir) = std::fs::read_dir("/dev/input") else {
@@ -547,8 +549,14 @@ fn watch_remote(ui: slint::Weak<App>) {
                 let slot = match code {
                     KEY_BACK => 0,
                     KEY_HOMEPAGE => 1,
-                    KEY_MENU => 2,
-                    _ => continue,
+                    c if MENU_KEYS.contains(&c) => 2,
+                    _ => {
+                        // Info, not debug: when a remote button does nothing, this names its code.
+                        if !(code < 100 || [103, 105, 106, 108].contains(&code)) {
+                            tracing::info!(code, "unmapped remote key");
+                        }
+                        continue;
+                    }
                 };
                 {
                     let mut last = LAST.lock().unwrap();
