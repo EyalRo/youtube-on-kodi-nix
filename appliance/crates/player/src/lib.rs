@@ -89,7 +89,6 @@ pub fn core_for(system: &str) -> Option<&'static str> {
 pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
     let mut a: Vec<String> = [
         "--no-terminal",
-        "--fullscreen",
         "--vo=gpu",
         "--gpu-context=drm",
         "--hwdec=vaapi",
@@ -99,11 +98,11 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
         "--audio-spdif=ac3,eac3",
         "--audio-channels=auto-safe",
         // Playback overlay: mpv's built-in OSC bar (progress, time, seek/pause).
-        // auto = appear on interaction (buttons, seek, pause) and hide ~2.5s after
+        // auto = appear on interaction (buttons, seek, pause) and hide ~1s after
         // the last interaction (hidetimeout is in ms); osd-level 3 is full OSD.
         // The UI and mpv are separate processes (D2), so the overlay must be
         // mpv-rendered on the same DRM plane, never a Slint screen.
-        "--script-opts=osc-visibility=auto,osc-hidetimeout=2500",
+        "--script-opts=osc-visibility=auto,osc-hidetimeout=1000",
         "--osd-level=3",
     ]
     .map(String::from)
@@ -123,7 +122,13 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
     a
 }
 
-pub fn retroarch_args(cfg: &Config, play: &Play) -> Result<Vec<String>, PlayError> {
+/// RetroArch settings that have no command-line flag (it rejects `--video-driver`), passed
+/// through `--appendconfig`. Bare DRM/KMS kiosk (no X11/Wayland/compositor, D2 handoff):
+/// RetroArch's default GL/X11 driver finds no display server and aborts, so select the
+/// "drm" driver, which renders on the DRM plane via GBM/EGL like mpv does.
+const RETROARCH_OVERRIDES: &str = "video_driver = \"drm\"\nvideo_fullscreen = \"true\"\n";
+
+pub fn retroarch_args(cfg: &Config, play: &Play, overrides: &Path) -> Result<Vec<String>, PlayError> {
     let system = play
         .system
         .as_deref()
@@ -131,12 +136,7 @@ pub fn retroarch_args(cfg: &Config, play: &Play) -> Result<Vec<String>, PlayErro
     let core = core_for(system)
         .ok_or_else(|| PlayError::Launch(format!("no libretro core for system {system}")))?;
     Ok(vec![
-        // Bare DRM/KMS kiosk (no X11/Wayland/compositor, D2 handoff). RetroArch's default
-        // video driver is GL/X11 (or Wayland), which finds no display server and aborts
-        // (SIGABRT in init_video). The "drm" driver renders on the DRM plane via GBM/EGL,
-        // the same world mpv lives in; it implies fullscreen on the single connector.
-        "--video-driver=drm".into(),
-        "--fullscreen".into(),
+        format!("--appendconfig={}", overrides.display()),
         "-L".into(),
         cfg.core_dir
             .join(format!("{core}_libretro.so"))
@@ -249,7 +249,12 @@ fn run_mpv(cfg: &Config, play: &Play) -> Result<(), PlayError> {
 }
 
 fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
-    let args = retroarch_args(cfg, play)?;
+    let overrides = std::env::temp_dir().join(format!("retroarch-overrides-{}.cfg", std::process::id()));
+    std::fs::write(&overrides, RETROARCH_OVERRIDES).map_err(|e| {
+        tracing::error!(path = %overrides.display(), error = %e, "cannot write retroarch overrides");
+        PlayError::Launch(format!("cannot write {}: {e}", overrides.display()))
+    })?;
+    let args = retroarch_args(cfg, play, &overrides)?;
     http::post_json(
         &cfg.mediad,
         &format!("/items/{}/played", play.id),
@@ -260,6 +265,7 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         .args(args)
         .status()
         .map_err(|e| PlayError::Launch(format!("cannot start {}: {e}", cfg.retroarch.display())))?;
+    let _ = std::fs::remove_file(&overrides);
     tracing::info!(id = %play.id, %status, "retroarch exited");
     if !status.success() {
         tracing::error!(id = %play.id, path = %play.path.display(), %status, "retroarch failed");
@@ -326,7 +332,7 @@ mod tests {
         );
         assert!(a.contains("--start=125.5") && a.contains("--input-ipc-server=/run/p.sock"));
         assert!(
-            a.contains("--script-opts=osc-visibility=auto,osc-hidetimeout=2500")
+            a.contains("--script-opts=osc-visibility=auto,osc-hidetimeout=1000")
                 && a.contains("--osd-level=3"),
             "the mpv OSC overlay must be enabled"
         );
@@ -352,10 +358,9 @@ mod tests {
         let mut p = play("game", 0.0);
         p.system = Some("genesis".into());
         assert_eq!(
-            retroarch_args(&cfg(), &p).unwrap(),
+            retroarch_args(&cfg(), &p, Path::new("/o.cfg")).unwrap(),
             [
-                "--video-driver=drm",
-                "--fullscreen",
+                "--appendconfig=/o.cfg",
                 "-L",
                 "/cores/genesis_plus_gx_libretro.so",
                 "--",
@@ -364,10 +369,9 @@ mod tests {
         );
         p.system = Some("n64".into());
         assert_eq!(
-            retroarch_args(&cfg(), &p).unwrap(),
+            retroarch_args(&cfg(), &p, Path::new("/o.cfg")).unwrap(),
             [
-                "--video-driver=drm",
-                "--fullscreen",
+                "--appendconfig=/o.cfg",
                 "-L",
                 "/cores/mupen64plus_next_libretro.so",
                 "--",
@@ -375,7 +379,7 @@ mod tests {
             ]
         );
         p.system = None;
-        assert!(retroarch_args(&cfg(), &p).is_err());
+        assert!(retroarch_args(&cfg(), &p, Path::new("/o.cfg")).is_err());
     }
 
     #[test]
