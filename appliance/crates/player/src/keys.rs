@@ -4,9 +4,10 @@
 //! keyboard. Instead the player reads the kernel's input devices (`/dev/input/event*`, which
 //! also carry HID remotes and CEC-to-uinput bridges) and turns presses into mpv IPC commands.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -43,6 +44,17 @@ pub fn decode(event: &[u8; EVENT_SIZE]) -> Option<(u16, bool)> {
 fn send(socket: &PathBuf, command: &Value) {
     if let Ok(mut s) = UnixStream::connect(socket) {
         let _ = writeln!(s, "{command}");
+        // mpv writes a reply for every command. If we drop the handle right after
+        // writing, mpv's response write hits a closed socket and logs
+        // "[e][ipc_N] Write error (Broken pipe)" for every seek/pause/quit. Give it
+        // a moment to write its reply before we close, and swallow whatever comes
+        // back. The reply is a single line; block briefly with a timeout so we
+        // never hang the input thread if mpv has nothing to send.
+        if s.set_read_timeout(Some(Duration::from_millis(50))).is_ok() {
+            let mut reader = BufReader::new(s);
+            let mut line = String::new();
+            let _ = reader.read_line(&mut line);
+        }
     }
 }
 
