@@ -111,6 +111,9 @@ export component App inherits Window {
     callback menu();
     callback menu-activate();
     callback menu-close();
+    // The settings page (top bar, first button): for now the appliance version.
+    in property <string> version: "";
+    in-out property <bool> settings-open: false;
     // Debug builds log every remote button the UI receives (the text of the key event).
     callback key-debug(string);
     // sel-row == -1 puts the focus on the top bar; bar-sel picks the button (0 settings, 1 reboot,
@@ -137,6 +140,7 @@ export component App inherits Window {
     // returns to the page below it. On the show list there is nowhere further up.
     public function go-back() {
         disarm-power("button");
+        if (settings-open) { settings-open = false; return; }
         if (menu-open) { menu-close(); return; }
         if (detail) {
             if (detail-focus == 1) { detail-focus = 0; moved(); }
@@ -150,6 +154,7 @@ export component App inherits Window {
     // Home goes to the top of the tree: out of any show page, onto the first row.
     public function go-home() {
         disarm-power("button");
+        if (settings-open) { settings-open = false; return; }
         if (menu-open) { menu-close(); return; }
         if (detail) { back(); }
         sel-row = rows.length > 0 ? 0 : -1;
@@ -168,8 +173,7 @@ export component App inherits Window {
 
     function bar-activate() {
         if (bar-sel == 0) {
-            notice = "Settings are not built yet";
-            notice-timer.running = true;
+            settings-open = true;
             config();
         } else if (armed == bar-sel) {
             armed = -1;
@@ -184,6 +188,7 @@ export component App inherits Window {
     fs := FocusScope {
         key-pressed(e) => {
             key-debug(e.text);
+            if (settings-open) { settings-open = false; return accept; }
             // Reboot and shutdown need a second select; any other button cancels.
             if (e.text != Key.Return && armed >= 0) { disarm-power("button"); }
             if (menu-open) {
@@ -523,6 +528,51 @@ export component App inherits Window {
             }
         }
     }
+    }
+
+    // Settings: a modal page, any button closes it.
+    if settings-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000080;
+        Rectangle {
+            x: (root.width - 560px) / 2;
+            y: (root.height - 220px) / 2;
+            width: 560px;
+            height: 220px;
+            border-radius: 20px;
+            background: #16202a;
+            border-width: 2px;
+            border-color: #2a3844;
+            Text {
+                x: 32px;
+                y: 28px;
+                width: 496px;
+                text: "Settings";
+                font-size: 26px;
+                font-weight: 600;
+                color: white;
+            }
+            Text {
+                x: 32px;
+                y: 92px;
+                width: 496px;
+                text: "Version " + version;
+                font-size: 26px;
+                color: #ffd54a;
+            }
+            Text {
+                x: 32px;
+                y: 176px;
+                width: 496px;
+                text: "any button to close";
+                font-size: 18px;
+                color: #7d8892;
+                horizontal-alignment: center;
+            }
+        }
     }
 
     // Watched-toggle menu: a modal single-entry dialog. Enter selects; anything

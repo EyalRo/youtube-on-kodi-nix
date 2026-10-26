@@ -126,7 +126,8 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
 /// through `--appendconfig`. Bare DRM/KMS kiosk (no X11/Wayland/compositor, D2 handoff):
 /// RetroArch's default GL/X11 driver finds no display server and aborts, so select the
 /// "drm" driver, which renders on the DRM plane via GBM/EGL like mpv does.
-const RETROARCH_OVERRIDES: &str = "video_driver = \"drm\"\nvideo_fullscreen = \"true\"\n";
+const RETROARCH_OVERRIDES: &str =
+    "video_driver = \"drm\"\nvideo_fullscreen = \"true\"\nui_companion_start_on_boot = \"false\"\ndesktop_menu_enable = \"false\"\n";
 
 pub fn retroarch_args(cfg: &Config, play: &Play, overrides: &Path) -> Result<Vec<String>, PlayError> {
     let system = play
@@ -262,6 +263,9 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
     )?;
     applog::debug!(retroarch = %cfg.retroarch.display(), args = ?args, "starting retroarch");
     let status = Command::new(&cfg.retroarch)
+        // nixpkgs builds RetroArch with its Qt desktop companion, which aborts with no X11/Wayland;
+        // the offscreen platform lets it initialise without a display (the game uses the drm driver).
+        .env("QT_QPA_PLATFORM", "offscreen")
         .args(args)
         .status()
         .map_err(|e| PlayError::Launch(format!("cannot start {}: {e}", cfg.retroarch.display())))?;

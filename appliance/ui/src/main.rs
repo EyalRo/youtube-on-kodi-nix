@@ -553,7 +553,7 @@ fn watch_remote(ui: slint::Weak<App>) {
                     _ => {
                         // Info, not debug: when a remote button does nothing, this names its code.
                         if !(code < 100 || [103, 105, 106, 108].contains(&code)) {
-                            tracing::info!(code, "unmapped remote key");
+                            debug_log!(code, "unmapped remote key");
                         }
                         continue;
                     }
@@ -592,6 +592,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let play = env_or("UI_PLAY", "play");
 
     let ui = App::new()?;
+    ui.set_version(env!("CARGO_PKG_VERSION").into());
     // mediad may still be starting (or rescanning); show an empty UI rather than dying.
     let rows = load_rows(&mediad, &cache).unwrap_or_else(|e| {
         tracing::error!(error = %e, "cannot load rows");
@@ -634,7 +635,7 @@ fn main() -> Result<(), slint::PlatformError> {
     if let Some(mut tick) = tick_player() {
         ui.on_moved(move || tick());
     }
-    ui.on_config(|| tracing::info!("settings requested (not built yet)"));
+    ui.on_config(|| tracing::info!(version = env!("CARGO_PKG_VERSION"), "settings opened"));
     #[cfg(appliance_debug)]
     ui.on_key_debug(|text| {
         let codes: Vec<u32> = text.chars().map(u32::from).collect();
