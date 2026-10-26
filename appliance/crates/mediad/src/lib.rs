@@ -159,6 +159,24 @@ fn not_found(what: &str) -> ApiError {
     ApiError(StatusCode::NOT_FOUND, format!("no such {what}"))
 }
 
+/// One log line per request: 5xx is an error, 4xx a warning (a missing item or art is often
+/// expected, but a play that 404s is not), everything else debug.
+async fn log_requests(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let (method, path) = (req.method().clone(), req.uri().path().to_string());
+    let started = std::time::Instant::now();
+    let resp = next.run(req).await;
+    let status = resp.status();
+    let ms = started.elapsed().as_millis() as u64;
+    if status.is_server_error() {
+        tracing::error!(%method, %path, status = status.as_u16(), ms, "request failed");
+    } else if status.is_client_error() {
+        tracing::warn!(%method, %path, status = status.as_u16(), ms, "request rejected");
+    } else {
+        applog::debug!(%method, %path, status = status.as_u16(), ms, "request");
+    }
+    resp
+}
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -171,6 +189,7 @@ pub fn router(state: AppState) -> Router {
         .route("/items/{id}/art", get(art))
         .route("/episodes/{id}/art", get(episode_art))
         .route("/rescan", post(rescan))
+        .layer(axum::middleware::from_fn(log_requests))
         .with_state(state)
 }
 
@@ -213,7 +232,8 @@ async fn play(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Js
         .expect("store lock poisoned")
         .play_info(&id)?
         .ok_or_else(|| not_found("item"))?;
-    tracing::info!(id = %p.id, kind = p.kind, resume = p.resume_position, "play requested");
+    tracing::info!(id = %p.id, asked_for = %id, kind = p.kind, resume = p.resume_position, "play requested");
+    applog::debug!(path = %p.path.display(), title = %p.title, "play resolved");
     Ok(Json(json!({
         "id": p.id, "kind": p.kind, "title": p.title, "path": p.path,
         "resume_position": p.resume_position, "system": p.system,
@@ -235,7 +255,7 @@ async fn progress(
         .lock()
         .expect("store lock poisoned")
         .save_progress(&id, p.position, p.duration)?;
-    tracing::debug!(id = %id, position = p.position, duration = p.duration, "progress saved");
+    applog::debug!(id = %id, position = p.position, duration = p.duration, "progress saved");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -244,6 +264,7 @@ async fn played(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<
         .lock()
         .expect("store lock poisoned")
         .mark_played(&id)?;
+    tracing::info!(id = %id, "marked played");
     Ok(StatusCode::NO_CONTENT)
 }
 

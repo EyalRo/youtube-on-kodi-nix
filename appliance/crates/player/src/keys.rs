@@ -58,17 +58,20 @@ pub fn watch(socket: PathBuf) {
             continue;
         }
         let Ok(mut dev) = std::fs::File::open(&path) else {
-            tracing::debug!(device = %path.display(), "cannot open input device");
+            applog::debug!(device = %path.display(), "cannot open input device");
             continue;
         };
         let socket = socket.clone();
+        applog::debug!(device = %path.display(), "watching input device");
         std::thread::spawn(move || {
             let mut buf = [0u8; EVENT_SIZE];
             while dev.read_exact(&mut buf).is_ok() {
-                if let Some((code, repeat)) = decode(&buf)
-                    && let Some(cmd) = command_for(code, repeat)
-                {
-                    send(&socket, &cmd);
+                if let Some((code, repeat)) = decode(&buf) {
+                    let cmd = command_for(code, repeat);
+                    applog::debug!(code, repeat, command = ?cmd, "key during playback");
+                    if let Some(cmd) = cmd {
+                        send(&socket, &cmd);
+                    }
                 }
             }
         });

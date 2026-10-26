@@ -12,7 +12,7 @@ fn env_or(name: &str, default: &str) -> String {
 
 #[tokio::main]
 async fn main() {
-    let filter = EnvFilter::try_from_env("MEDIAD_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_env("MEDIAD_LOG").unwrap_or_else(|_| EnvFilter::new(applog::default_filter()));
     if env_or("MEDIAD_LOG_FORMAT", "json") == "json" {
         tracing_subscriber::fmt()
             .json()
@@ -50,7 +50,7 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    tracing::info!(media_root = %media_root.display(), db = %db_path.display(), %bind, rescan_secs, "mediad starting");
+    tracing::info!(media_root = %media_root.display(), db = %db_path.display(), %bind, rescan_secs, debug_build = applog::DEBUG_BUILD, "mediad starting");
 
     let mut state = AppState::new(store, media_root, release_db);
     if let Ok(dir) = std::env::var("MEDIAD_ART_CACHE")

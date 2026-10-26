@@ -37,6 +37,7 @@ pub fn monitor(
     let mut have_position = false;
     for line in BufReader::new(stream).lines() {
         let Ok(line) = line else { break };
+        applog::debug!(%line, "mpv ipc");
         let Ok(msg) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
@@ -60,6 +61,7 @@ pub fn monitor(
                 }
             }
             Some("end-file") => {
+                applog::debug!(event = %msg, "mpv end-file");
                 last.finished = msg.get("reason").and_then(Value::as_str) == Some("eof")
             }
             _ => {}

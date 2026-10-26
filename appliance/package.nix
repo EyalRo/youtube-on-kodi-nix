@@ -1,5 +1,7 @@
 # The appliance's binaries (mediad, ytsync) from the Cargo workspace.
-{ lib, rustPlatform }:
+# `debug = true` compiles the debug logs in (RUSTFLAGS --cfg appliance_debug) and lifts the
+# default log filter to debug; without it they are not in the binaries at all.
+{ lib, rustPlatform, debug ? false }:
 
 rustPlatform.buildRustPackage {
   pname = "media-appliance";
@@ -15,6 +17,10 @@ rustPlatform.buildRustPackage {
   };
 
   cargoLock.lockFile = ./Cargo.lock;
+
+  preBuild = lib.optionalString debug ''
+    export RUSTFLAGS="$RUSTFLAGS --cfg appliance_debug"
+  '';
 
   # Builds the whole workspace, runs its tests, installs the two binaries.
   meta = {

@@ -421,9 +421,19 @@ impl Store {
         let pick = in_progress
             .or_else(|| episodes.iter().find(|e| !e.watched))
             .or(episodes.first());
+        applog::debug!(
+            show = %item_id,
+            episodes = episodes.len(),
+            in_progress = ?in_progress.map(|e| &e.id),
+            picked = ?pick.map(|e| (&e.id, e.season, e.episode)),
+            "picked the episode to play"
+        );
         match pick {
             Some(e) => self.play_info(&e.id),
-            None => Ok(None),
+            None => {
+                tracing::warn!(show = %item_id, "nothing to play: the show has no episodes");
+                Ok(None)
+            }
         }
     }
 

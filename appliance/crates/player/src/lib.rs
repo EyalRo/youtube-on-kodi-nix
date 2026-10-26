@@ -85,7 +85,6 @@ pub fn core_for(system: &str) -> Option<&'static str> {
 pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
     let mut a: Vec<String> = [
         "--no-terminal",
-        "--really-quiet",
         "--fullscreen",
         "--vo=gpu",
         "--gpu-context=drm",
@@ -98,6 +97,8 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
     ]
     .map(String::from)
     .to_vec();
+    // mpv has no terminal here, so its own diagnosis goes to a log file (see `run_mpv`).
+    a.push(format!("--msg-level=all={}", if applog::DEBUG_BUILD { "v" } else { "warn" }));
     a.push(format!("--drm-connector={}", cfg.drm_connector));
     a.push(format!("--audio-device={}", cfg.audio_device));
     a.push(format!("--input-ipc-server={}", socket.display()));
@@ -142,18 +143,45 @@ pub fn final_report(f: ipc::Final) -> Option<(f64, f64)> {
     Some((if f.finished { f.duration } else { f.position }, f.duration))
 }
 
+/// Put `extra` before the `--` that ends mpv's options.
+fn before_files(mut args: Vec<String>, extra: impl IntoIterator<Item = String>) -> Vec<String> {
+    let at = args.iter().rposition(|a| a == "--").unwrap_or(args.len());
+    args.splice(at..at, extra);
+    args
+}
+
+/// The last `n` lines of mpv's log, for the journal.
+fn log_tail(path: &Path, n: usize) -> String {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(n)..].join("\n")
+}
+
 fn run_mpv(cfg: &Config, play: &Play) -> Result<(), PlayError> {
     let dir = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
     let socket = dir.join(format!("play-{}.sock", std::process::id()));
+    let mpv_log = dir.join(format!("play-{}.mpv.log", std::process::id()));
     let _ = std::fs::remove_file(&socket);
+    let args = before_files(
+        mpv_args(cfg, play, &socket),
+        [format!("--log-file={}", mpv_log.display())],
+    );
+    applog::debug!(mpv = %cfg.mpv.display(), args = ?args, "starting mpv");
+    if !play.path.exists() {
+        // mpv would only say "file not found" into its log; say it here too, with the path.
+        tracing::warn!(path = %play.path.display(), "the file to play does not exist (NAS mount down?)");
+    }
     let mut child = Command::new(&cfg.mpv)
-        .args(mpv_args(cfg, play, &socket))
+        .args(args)
         .spawn()
         .map_err(|e| PlayError::Launch(format!("cannot start {}: {e}", cfg.mpv.display())))?;
+    tracing::info!(id = %play.id, pid = child.id(), "mpv started");
     keys::watch(socket.clone());
     // mpv creates the socket a moment after starting.
     let mut stream = None;
+    let mut tries = 0;
     for _ in 0..100 {
+        tries += 1;
         if let Ok(s) = std::os::unix::net::UnixStream::connect(&socket) {
             stream = Some(s);
             break;
@@ -163,8 +191,10 @@ fn run_mpv(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+    applog::debug!(tries, connected = stream.is_some(), "waited for mpv's control socket");
     let fin = match stream {
         Some(s) => ipc::monitor(s, cfg.progress_interval, |pos, dur| {
+            applog::debug!(id = %play.id, position = pos, duration = dur, "reporting progress");
             if let Err(e) = http::post_json(
                 &cfg.mediad,
                 &format!("/items/{}/progress", play.id),
@@ -182,6 +212,11 @@ fn run_mpv(cfg: &Config, play: &Play) -> Result<(), PlayError> {
     let status = child.wait().map_err(|e| PlayError::Launch(e.to_string()))?;
     let _ = std::fs::remove_file(&socket);
     tracing::info!(id = %play.id, %status, position = fin.position, duration = fin.duration, finished = fin.finished, "mpv exited");
+    applog::debug!(log = %log_tail(&mpv_log, 200), "mpv log");
+    if !status.success() {
+        tracing::error!(id = %play.id, path = %play.path.display(), %status, log = %log_tail(&mpv_log, 15), "mpv failed");
+    }
+    let _ = std::fs::remove_file(&mpv_log);
     if let Some((pos, dur)) = final_report(fin) {
         http::post_json(
             &cfg.mediad,
@@ -203,11 +238,15 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         &format!("/items/{}/played", play.id),
         &json!({}),
     )?;
+    applog::debug!(retroarch = %cfg.retroarch.display(), args = ?args, "starting retroarch");
     let status = Command::new(&cfg.retroarch)
         .args(args)
         .status()
         .map_err(|e| PlayError::Launch(format!("cannot start {}: {e}", cfg.retroarch.display())))?;
     tracing::info!(id = %play.id, %status, "retroarch exited");
+    if !status.success() {
+        tracing::error!(id = %play.id, path = %play.path.display(), %status, "retroarch failed");
+    }
     if status.success() {
         Ok(())
     } else {
@@ -217,7 +256,9 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
 
 /// Play an item (movie, game, episode, or a show/channel that resolves to an episode).
 pub fn play_item(cfg: &Config, item_id: &str) -> Result<(), PlayError> {
+    tracing::info!(item = %item_id, "play requested");
     let reply = http::get_json(&cfg.mediad, &format!("/items/{item_id}/play"))?;
+    applog::debug!(reply = %reply, "mediad's play reply");
     let play = Play::from_json(&reply)?;
     tracing::info!(id = %play.id, kind = %play.kind, title = %play.title, resume = play.resume_position, "starting playback");
     if play.kind == "game" {

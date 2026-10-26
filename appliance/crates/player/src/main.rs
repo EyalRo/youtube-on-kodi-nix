@@ -13,7 +13,8 @@ fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .json()
         .with_env_filter(
-            EnvFilter::try_from_env("PLAYER_LOG").unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_env("PLAYER_LOG")
+                .unwrap_or_else(|_| EnvFilter::new(applog::default_filter())),
         )
         .init();
     let Some(item) = std::env::args().nth(1) else {
@@ -36,6 +37,8 @@ fn main() -> ExitCode {
             .collect(),
         progress_interval: Duration::from_secs(5),
     };
+    tracing::info!(item = %item, debug_build = applog::DEBUG_BUILD, "player starting");
+    applog::debug!(config = ?cfg, "player config");
     match play_item(&cfg, &item) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

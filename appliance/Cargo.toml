@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/artsync", "crates/catalog", "crates/scanner", "crates/store", "crates/mediad", "crates/ytsync", "crates/kodiimport", "crates/player"]
+members = ["crates/applog", "crates/artsync", "crates/catalog", "crates/scanner", "crates/store", "crates/mediad", "crates/ytsync", "crates/kodiimport", "crates/player"]
 
 [workspace.package]
 version = "0.1.0"

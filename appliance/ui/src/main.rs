@@ -16,6 +16,18 @@ use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 
 slint::include_modules!();
 
+/// Debug logging that exists only in debug builds (`RUSTFLAGS="--cfg appliance_debug"`); the
+/// back end's `applog` crate does the same, but this is a separate workspace.
+#[cfg(appliance_debug)]
+macro_rules! debug_log {
+    ($($t:tt)*) => { tracing::debug!($($t)*) };
+}
+#[cfg(not(appliance_debug))]
+macro_rules! debug_log {
+    ($($t:tt)*) => {};
+}
+const DEBUG_BUILD: bool = cfg!(appliance_debug);
+
 const MAX_TILES: usize = 40;
 /// Exit status that asks the supervisor to run `play` (id in `$UI_STATE/launch`).
 const EXIT_LAUNCH: i32 = 10;
@@ -63,8 +75,15 @@ fn load_art(addr: &str, id: &str, cache: &Path) -> Option<Image> {
 
 /// Fetch an image from mediad (`path`) into the cache under `key` and decode it.
 fn load_image(addr: &str, path: &str, key: &str, cache: &Path) -> Option<Image> {
-    let (status, ctype, body) = get(addr, path).ok()?;
+    let (status, ctype, body) = match get(addr, path) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(%path, error = %e, "cannot fetch an image");
+            return None;
+        }
+    };
     if status != 200 {
+        tracing::warn!(%path, status, "image not available");
         return None;
     }
     // The bytes decide, not the header or the name: a channel avatar is a PNG called poster.jpg.
@@ -78,8 +97,13 @@ fn load_image(addr: &str, path: &str, key: &str, cache: &Path) -> Option<Image> 
         "jpg"
     };
     let file = cache.join(format!("{key}.{ext}"));
-    std::fs::write(&file, body).ok()?;
-    Image::load_from_path(&file).ok()
+    if let Err(e) = std::fs::write(&file, body) {
+        tracing::warn!(file = %file.display(), error = %e, "cannot cache an image");
+        return None;
+    }
+    Image::load_from_path(&file)
+        .map_err(|e| tracing::warn!(file = %file.display(), error = ?e, "cannot decode an image"))
+        .ok()
 }
 
 /// One season tab and its episodes, as mediad lists them.
@@ -98,7 +122,10 @@ struct Detail {
 /// Group `/items/{id}` episodes into seasons in the order mediad gives them: a show ascending,
 /// a channel newest first (its "seasons" are upload years).
 fn load_detail(addr: &str, id: &str) -> Result<Detail, String> {
+    #[cfg(appliance_debug)]
+    let started = std::time::Instant::now();
     let v = get_json(addr, &format!("/items/{id}"))?;
+    debug_log!(%id, ms = started.elapsed().as_millis() as u64, "loaded a page");
     let channel = v["item"]["kind"].as_str() == Some("channel");
     let mut seasons: Vec<(i64, Vec<Value>)> = Vec::new();
     for ep in v["episodes"].as_array().ok_or("no episodes")? {
@@ -173,7 +200,10 @@ fn set_season(ui: &App, addr: &str, detail: &Detail, idx: usize, cache: &Path) {
 fn open_detail(ui: &App, addr: &str, id: &str, season: usize, ep: usize, cache: &Path) -> Option<Detail> {
     let detail = match load_detail(addr, id) {
         Ok(d) if !d.seasons.is_empty() => d,
-        Ok(_) => return None,
+        Ok(_) => {
+            tracing::warn!(%id, "the page has no seasons; staying on the home screen");
+            return None;
+        }
         Err(e) => {
             tracing::error!(%id, error = %e, "cannot open the page");
             return None;
@@ -187,6 +217,7 @@ fn open_detail(ui: &App, addr: &str, id: &str, season: usize, ep: usize, cache: 
     ui.set_sel_season(season as i32);
     set_season(ui, addr, &detail, season, cache);
     let eps = ui.get_episodes().row_count();
+    debug_log!(%id, season, ep, episodes = eps, "page contents set");
     ui.set_sel_ep(ep.min(eps.saturating_sub(1)) as i32);
     ui.set_detail_focus(1.min(eps as i32));
     ui.set_detail(true);
@@ -198,14 +229,22 @@ fn open_detail(ui: &App, addr: &str, id: &str, season: usize, ep: usize, cache: 
 fn launch(ui: &App, id: &str, inproc: bool, play: &str) {
     tracing::info!(%id, inproc, "handing the display to play");
     let dir = state_dir();
-    let _ = std::fs::create_dir_all(&dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::error!(dir = %dir.display(), error = %e, "cannot create the state directory");
+    }
     if inproc {
         let _ = ui.hide();
         let status = Command::new(play).arg(id).status();
-        tracing::info!(?status, "play returned");
+        match &status {
+            Ok(s) if s.success() => tracing::info!(?status, "play returned"),
+            _ => tracing::error!(?status, %id, "play failed"),
+        }
         let _ = ui.show();
     } else {
-        let _ = std::fs::write(dir.join("launch"), id);
+        // Without this file the supervisor will not run `play`, so the press would do nothing.
+        if let Err(e) = std::fs::write(dir.join("launch"), id) {
+            tracing::error!(file = %dir.join("launch").display(), %id, error = %e, "cannot write the launch request; nothing will play");
+        }
         let _ = slint::quit_event_loop();
         LAUNCH.store(true, std::sync::atomic::Ordering::SeqCst);
     }
@@ -377,9 +416,10 @@ fn main() -> Result<(), slint::PlatformError> {
         .json()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("UI_LOG")
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(if DEBUG_BUILD { "info,appliance_ui=debug" } else { "info" })),
         )
         .init();
+    tracing::info!(debug_build = DEBUG_BUILD, "appliance-ui starting");
     let mediad = env_or("UI_MEDIAD", "127.0.0.1:8730");
     let cache = PathBuf::from(env_or("UI_CACHE", "/tmp/appliance-ui/art"));
     let inproc = env_or("UI_HANDOFF", "exit") == "inproc";
@@ -429,6 +469,11 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.on_moved(move || tick());
     }
     ui.on_config(|| tracing::info!("settings requested (not built yet)"));
+    #[cfg(appliance_debug)]
+    ui.on_key_debug(|text| {
+        let codes: Vec<u32> = text.chars().map(u32::from).collect();
+        tracing::debug!(?codes, "key reached the UI");
+    });
     ui.on_arm(|action| power_event("armed", action.as_str(), "press Enter again within 3 s to confirm"));
     ui.on_disarm(|action, why| power_event("cancelled", action.as_str(), why.as_str()));
     ui.on_power(|action| {
@@ -464,6 +509,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let (weak, page) = (ui.as_weak(), page.clone());
         ui.on_back(move || {
             let Some(ui) = weak.upgrade() else { return };
+            debug_log!("back to the home screen");
             let _ = std::fs::remove_file(state_dir().join("detail"));
             *page.borrow_mut() = None;
             ui.set_detail(false);
@@ -473,7 +519,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let (weak, page, play) = (ui.as_weak(), page.clone(), play.clone());
         ui.on_play_episode(move |i| {
             let Some(ui) = weak.upgrade() else { return };
-            let Some(ep) = ui.get_episodes().row_data(i as usize) else { return };
+            let Some(ep) = ui.get_episodes().row_data(i as usize) else {
+                tracing::warn!(index = i, "play pressed on an episode that is not in the list");
+                return;
+            };
+            tracing::info!(episode = %ep.id, title = %ep.title, "episode chosen");
             if let Some(d) = page.borrow().as_ref() {
                 remember_page(&d.id, ui.get_sel_season(), i);
             }
@@ -487,10 +537,12 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(ui) = weak.upgrade() else { return };
             let rows = ui.get_rows();
             let Some(tile) = rows.row_data(row as usize).and_then(|r| r.tiles.row_data(col as usize)) else {
+                tracing::warn!(row, col, "activate on a tile that does not exist");
                 return;
             };
             let _ = std::fs::create_dir_all(state_dir());
             let _ = std::fs::write(state_dir().join("focus"), format!("{row} {col}"));
+            tracing::info!(row, col, id = %tile.id, kind = %tile.kind, title = %tile.title, "tile chosen");
             if matches!(tile.kind.as_str(), "show" | "channel") {
                 let opened = open_detail(&ui, &mediad, tile.id.as_str(), 0, 0, &cache_dir);
                 if opened.is_some() {

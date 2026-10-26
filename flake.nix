@@ -130,8 +130,12 @@
         e2e-stress-trivial = e2eStressTrivial pkgs;
         e2e-stress-trivial-py314 = e2eStressTrivial314 pkgs;
         skin = skin pkgs;
-        appliance = pkgs.callPackage ./appliance/package.nix { };
-        appliance-ui = pkgs.callPackage ./appliance/ui/package.nix { };
+        # The appliance runs debug builds for now: the debug logs are compiled in and the default
+        # log filter is debug. `appliance-release` and `appliance-ui-release` leave them out.
+        appliance = pkgs.callPackage ./appliance/package.nix { debug = true; };
+        appliance-ui = pkgs.callPackage ./appliance/ui/package.nix { debug = true; };
+        appliance-release = pkgs.callPackage ./appliance/package.nix { };
+        appliance-ui-release = pkgs.callPackage ./appliance/ui/package.nix { };
       });
 
       # nix run .#e2e

@@ -1,5 +1,7 @@
 # The living-room UI (Slint on DRM/KMS) and its session supervisor.
-{ lib, rustPlatform, pkg-config, makeWrapper, alsa-utils, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd }:
+{ lib, rustPlatform, pkg-config, makeWrapper, alsa-utils, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd
+, debug ? false # compile the debug logs in (see ../package.nix)
+}:
 
 rustPlatform.buildRustPackage {
   pname = "appliance-ui";
@@ -18,6 +20,10 @@ rustPlatform.buildRustPackage {
   };
 
   cargoLock.lockFile = ./Cargo.lock;
+
+  preBuild = lib.optionalString debug ''
+    export RUSTFLAGS="$RUSTFLAGS --cfg appliance_debug"
+  '';
 
   nativeBuildInputs = [ pkg-config makeWrapper ];
   buildInputs = [ fontconfig libxkbcommon libinput udev libgbm libGL seatd ];

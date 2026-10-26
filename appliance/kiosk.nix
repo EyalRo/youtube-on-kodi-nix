@@ -99,6 +99,10 @@ in
         TTYVHangup = true;
         TTYVTDisallocate = true;
         StandardInput = "tty";
+        # StandardInput=tty would make output default to the tty too, where the UI's and the
+        # player's logs are lost; the journal is where they are read (and shipped from).
+        StandardOutput = "journal";
+        StandardError = "journal";
         ExecStart = "${cfg.package}/bin/appliance-ui-session";
         Restart = "always";
         RestartSec = 2;

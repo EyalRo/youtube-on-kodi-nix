@@ -25,3 +25,6 @@ slint = { version = "1.16", default-features = false, features = [
 
 [build-dependencies]
 slint-build = "1.16"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(appliance_debug)'] }

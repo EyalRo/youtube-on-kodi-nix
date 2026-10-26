@@ -1,0 +1,13 @@
+[package]
+name = "applog"
+description = "Debug logging that exists only in debug builds (RUSTFLAGS=\"--cfg appliance_debug\")"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tracing.workspace = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(appliance_debug)'] }
