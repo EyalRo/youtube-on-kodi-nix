@@ -212,6 +212,32 @@ fn recent_miss(cache: &Path, id: &str) -> bool {
 
 // ---- mediad -------------------------------------------------------------------------------
 
+/// How long artsync waits for mediad to start listening before giving up. mediad does a
+/// first scan of the library before it binds its socket, which on a large library takes
+/// longer than the boot-time timer's `OnBootSec`, so the two often race at boot.
+pub const MEDIAD_WAIT: Duration = Duration::from_secs(180);
+/// How often to probe while waiting.
+pub const MEDIAD_WAIT_POLL: Duration = Duration::from_secs(5);
+
+/// Probe mediad until it answers or the budget elapses. `Err` if it never came up.
+pub fn wait_for_mediad(addr: &str) -> Result<(), String> {
+    wait_for_mediad_bounded(addr, MEDIAD_WAIT)
+}
+
+/// `wait_for_mediad` with an explicit budget (tests use a small one).
+fn wait_for_mediad_bounded(addr: &str, budget: Duration) -> Result<(), String> {
+    let deadline = SystemTime::now() + budget;
+    loop {
+        if http(addr, "GET", "/health").is_ok() {
+            return Ok(());
+        }
+        if SystemTime::now() >= deadline {
+            return Err(format!("mediad at {addr} did not answer within {budget:?}"));
+        }
+        std::thread::sleep(MEDIAD_WAIT_POLL.min(budget));
+    }
+}
+
 fn http(addr: &str, method: &str, path: &str) -> Result<(u16, Vec<u8>), String> {
     let mut s = TcpStream::connect(addr).map_err(|e| format!("cannot reach mediad at {addr}: {e}"))?;
     s.set_read_timeout(Some(Duration::from_secs(120))).ok();
@@ -664,5 +690,34 @@ mod tests {
         let item = |id: &str, kind: &str| Item { id: id.into(), kind: kind.into(), title: "T".into(), year: None, system: None, has_art: false };
         let sum = run(&cfg, &[item("a", "game"), item("b", "game"), item("c", "game")]);
         assert_eq!(sum.wanted, 1);
+    }
+
+    #[test]
+    fn wait_for_mediad_succeeds_once_the_server_listens() {
+        // mediad is not up at boot; it should become reachable within the wait budget.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let serve = std::thread::spawn(move || {
+            // Answer the first probe: the listener is already bound, so
+            // wait_for_mediad_bounded succeeds on that single poll. Reply and close
+            // with a graceful shutdown so the client's read_to_end sees EOF (a plain
+            // drop can send RST instead).
+            let Ok((mut s, _)) = listener.accept() else { return };
+            let _ = std::io::Write::write_all(&mut s, b"HTTP/1.0 200 OK\r\nContent-Length: 0\r\n\r\n");
+            let _ = s.shutdown(std::net::Shutdown::Write);
+            drop(s);
+        });
+        // The listener is already bound, so this should succeed on the first poll.
+        assert!(wait_for_mediad_bounded(&addr.to_string(), Duration::from_secs(15)).is_ok());
+        serve.join().unwrap();
+    }
+
+    #[test]
+    fn wait_for_mediad_times_out_when_nothing_answers() {
+        // Nothing is listening; with a tiny budget it should give up with an error quickly.
+        let addr = "127.0.0.1:1"; // port 1 is not listening
+        let res = wait_for_mediad_bounded(addr, Duration::from_millis(50));
+        assert!(res.is_err(), "expected an error when mediad never answers");
+        assert!(res.unwrap_err().contains("did not answer"));
     }
 }

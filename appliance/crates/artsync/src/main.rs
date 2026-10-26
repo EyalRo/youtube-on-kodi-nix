@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use artsync::{Config, list_items, notify_rescan, run};
+use artsync::{wait_for_mediad, Config, list_items, notify_rescan, run};
 use tracing_subscriber::EnvFilter;
 
 fn env_or(name: &str, default: &str) -> String {
@@ -38,6 +38,13 @@ fn main() -> ExitCode {
         tmdb_key,
         max_lookups,
     };
+    // mediad may not be listening yet at boot (it scans the library before binding).
+    // Wait for it rather than failing a run that the timer will not re-fire until the
+    // next schedule or reboot.
+    if let Err(e) = wait_for_mediad(&cfg.mediad) {
+        tracing::error!(error = %e, "cannot list the library");
+        return ExitCode::from(1);
+    }
     let items = match list_items(&cfg.mediad) {
         Ok(i) => i,
         Err(e) => {
