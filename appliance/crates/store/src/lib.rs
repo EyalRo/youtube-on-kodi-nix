@@ -467,6 +467,105 @@ impl Store {
         self.save_progress(id, 0.0, 0.0)
     }
 
+    /// The playable ids a watch target covers. `season` = Some(n) means the whole
+    /// season `n` of a show/channel (its id); None means `id` is a movie, game or
+    /// episode (a single id) or a whole show/channel (all its episodes). A show or
+    /// channel with no episodes is an empty set.
+    fn target_ids(&self, id: &str, season: Option<i32>) -> Result<Vec<String>, StoreError> {
+        if let Some(n) = season {
+            return self.episode_ids(id, Some(n));
+        }
+        match self.is_entry(id)? {
+            Some(Kind::Show) | Some(Kind::Channel) => self.episode_ids(id, None),
+            Some(Kind::Movie) | Some(Kind::Game) => Ok(vec![id.to_string()]),
+            None => {
+                if self.is_episode(id)? {
+                    Ok(vec![id.to_string()])
+                } else {
+                    Err(StoreError::NotFound(id.to_string()))
+                }
+            }
+        }
+    }
+
+    /// The ids of every episode of a show/channel, or of one season of it if
+    /// `season` is Some.
+    pub fn episode_ids(&self, item_id: &str, season: Option<i32>) -> Result<Vec<String>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            if season.is_some() {
+                "SELECT id FROM episodes WHERE item_id = ?1 AND season = ?2"
+            } else {
+                "SELECT id FROM episodes WHERE item_id = ?1"
+            },
+        )?;
+        let rows: Vec<String> = if let Some(n) = season {
+            stmt.query_map(params![item_id, n], |r| r.get(0))?
+                .collect::<Result<_, _>>()?
+        } else {
+            stmt.query_map(params![item_id], |r| r.get(0))?
+                .collect::<Result<_, _>>()?
+        };
+        Ok(rows)
+    }
+
+    fn is_entry(&self, id: &str) -> Result<Option<Kind>, StoreError> {
+        Ok(self
+            .conn
+            .query_row("SELECT kind FROM entries WHERE id = ?1", params![id], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()?
+            .and_then(|k| Kind::parse(&k)))
+    }
+
+    fn is_episode(&self, id: &str) -> Result<bool, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM episodes WHERE id = ?1)",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )? != 0)
+    }
+
+    /// True only if every playable id a target covers is marked watched (a movie,
+    /// episode or game is watched by its own flag; a show/channel/season by all its
+    /// episodes). Empty targets are not watched.
+    pub fn is_watched(&self, id: &str, season: Option<i32>) -> Result<bool, StoreError> {
+        let ids = self.target_ids(id, season)?;
+        for i in &ids {
+            let w: i64 = self
+                .conn
+                .query_row(
+                    "SELECT COALESCE(watched, 0) FROM play_state WHERE id = ?1",
+                    params![i],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .unwrap_or(0);
+            if w == 0 {
+                return Ok(false);
+            }
+        }
+        Ok(!ids.is_empty())
+    }
+
+    /// Mark a movie, game or episode (or, via a season, all of one season of a show/
+    /// channel, or all episodes of a whole show/channel) watched or unwatched.
+    /// Unwatched also clears the resume position. Returns how many ids changed.
+    pub fn set_watched(&mut self, id: &str, season: Option<i32>, watched: bool) -> Result<usize, StoreError> {
+        let ids = self.target_ids(id, season)?;
+        let mut n = 0;
+        for i in &ids {
+            n += self.conn.execute(
+                "INSERT INTO play_state (id, position, duration, watched) VALUES (?1, 0, 0, ?2)
+                 ON CONFLICT(id) DO UPDATE SET position=0, watched=?2",
+                params![i, watched as i64],
+            )?;
+        }
+        Ok(n)
+    }
+
     /// The id of the movie, game or episode stored at this exact path.
     pub fn id_by_path(&self, path: &str) -> Result<Option<String>, StoreError> {
         Ok(self
@@ -742,6 +841,43 @@ mod tests {
         let p = s.play_info("g-1").unwrap().unwrap();
         assert_eq!((p.kind, p.system.as_deref()), ("game", Some("genesis")));
         assert_eq!(s.item("g-1").unwrap().unwrap().label2, "Genesis");
+    }
+
+    #[test]
+    fn set_watched_on_movie_episode_show_and_season() {
+        let mut s = store();
+        // A movie, watched.
+        assert!(!s.is_watched("m-1", None).unwrap());
+        assert_eq!(s.set_watched("m-1", None, true).unwrap(), 1);
+        assert!(s.is_watched("m-1", None).unwrap());
+        assert_eq!(s.item("m-1").unwrap().unwrap().label2, "Movie");
+        // Unwatch clears the resume point.
+        s.save_progress("m-1", 400.0, 1000.0).unwrap();
+        assert_eq!(s.set_watched("m-1", None, false).unwrap(), 1);
+        assert!(!s.is_watched("m-1", None).unwrap());
+        assert_eq!(s.play_info("m-1").unwrap().unwrap().resume_position, 0.0);
+        // A single episode.
+        assert_eq!(s.set_watched("e-1", None, true).unwrap(), 1);
+        assert!(s.is_watched("e-1", None).unwrap());
+        assert_eq!(s.item("s-1").unwrap().unwrap().watched, 1);
+        // A whole season (s-1 has all episodes in season 1).
+        assert_eq!(s.set_watched("s-1", Some(1), true).unwrap(), 3);
+        assert!(s.is_watched("s-1", Some(1)).unwrap());
+        assert_eq!(s.item("s-1").unwrap().unwrap().watched, 3);
+        assert_eq!(s.item("s-1").unwrap().unwrap().unwatched_date, None);
+        // A whole show: watched only when every episode is.
+        assert_eq!(s.set_watched("s-1", Some(1), false).unwrap(), 3);
+        assert!(!s.is_watched("s-1", None).unwrap());
+        assert_eq!(s.set_watched("s-1", None, true).unwrap(), 3);
+        assert!(s.is_watched("s-1", None).unwrap());
+        assert_eq!(s.item("s-1").unwrap().unwrap().watched, 3);
+        // Unwatched all episodes of the show.
+        assert_eq!(s.set_watched("s-1", None, false).unwrap(), 3);
+        assert!(!s.is_watched("s-1", None).unwrap());
+        assert_eq!(s.item("s-1").unwrap().unwrap().watched, 0);
+        // An unknown target is NotFound.
+        assert!(matches!(s.set_watched("nope", None, true), Err(StoreError::NotFound(_))));
+        assert!(matches!(s.is_watched("nope", None), Err(StoreError::NotFound(_))));
     }
 
     #[test]

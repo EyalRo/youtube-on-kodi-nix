@@ -8,3 +8,6 @@ appliance/target/
 result
 result-*
 *.qcow2
+
+# UI build output (separate workspace)
+appliance/ui/target/

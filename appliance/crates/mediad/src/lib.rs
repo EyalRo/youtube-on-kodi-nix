@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -186,6 +186,7 @@ pub fn router(state: AppState) -> Router {
         .route("/items/{id}/play", get(play))
         .route("/items/{id}/progress", post(progress))
         .route("/items/{id}/played", post(played))
+        .route("/items/{id}/watched", get(watched_status).post(watched))
         .route("/items/{id}/art", get(art))
         .route("/episodes/{id}/art", get(episode_art))
         .route("/rescan", post(rescan))
@@ -266,6 +267,50 @@ async fn played(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<
         .mark_played(&id)?;
     tracing::info!(id = %id, "marked played");
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct WatchedParams {
+    /// Set watched (default) or unwatched.
+    #[serde(default = "default_true")]
+    watched: bool,
+    /// If set, apply to one season of a show/channel (`id`), not the whole thing.
+    season: Option<i32>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Set a movie, episode, whole show/channel, or one season of it watched or
+/// unwatched. `watched=true` marks it watched; `watched=false` unwatches it.
+async fn watched(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Query(p): Query<WatchedParams>,
+) -> ApiResult<StatusCode> {
+    let n = s
+        .store
+        .lock()
+        .expect("store lock poisoned")
+        .set_watched(&id, p.season, p.watched)?;
+    tracing::info!(id = %id, season = ?p.season, watched = p.watched, n, "watched state set");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The current watched state of a target, so the UI can label the menu entry
+/// "Mark watched" vs "Mark unwatched".
+async fn watched_status(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Query(p): Query<WatchedParams>,
+) -> ApiResult<Json<Value>> {
+    let w = s
+        .store
+        .lock()
+        .expect("store lock poisoned")
+        .is_watched(&id, p.season)?;
+    Ok(Json(json!({ "id": id, "season": p.season, "watched": w })))
 }
 
 async fn art(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Response> {

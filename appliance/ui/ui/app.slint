@@ -95,6 +95,7 @@ export component App inherits Window {
     // The show or channel page: season tabs (detail-focus 0) over the episodes of one season (1).
     in property <bool> detail;
     in property <string> detail-title;
+    in-out property <string> detail-id: "";
     in property <[string]> seasons;
     in property <[EpisodeData]> episodes;
     in-out property <int> sel-season: 0;
@@ -103,6 +104,13 @@ export component App inherits Window {
     callback season-changed(int);
     callback play-episode(int);
     callback back();
+    // The watched-toggle menu: one entry ("Mark watched"/"Mark unwatched").
+    in property <bool> menu-open: false;
+    in property <string> menu-title: "";
+    in property <string> menu-action: "";
+    callback menu();
+    callback menu-activate();
+    callback menu-close();
     // Debug builds log every remote button the UI receives (the text of the key event).
     callback key-debug(string);
     // sel-row == -1 puts the focus on the top bar; bar-sel picks the button (0 settings, 1 reboot,
@@ -129,6 +137,7 @@ export component App inherits Window {
     // returns to the page below it. On the show list there is nowhere further up.
     public function go-back() {
         disarm-power("button");
+        if (menu-open) { menu-close(); return; }
         if (detail) {
             if (detail-focus == 1) { detail-focus = 0; moved(); }
             else if (detail-focus < 0) { detail-focus = 0; moved(); }
@@ -141,6 +150,7 @@ export component App inherits Window {
     // Home goes to the top of the tree: out of any show page, onto the first row.
     public function go-home() {
         disarm-power("button");
+        if (menu-open) { menu-close(); return; }
         if (detail) { back(); }
         sel-row = rows.length > 0 ? 0 : -1;
         sel-col = 0;
@@ -176,6 +186,11 @@ export component App inherits Window {
             key-debug(e.text);
             // Reboot and shutdown need a second select; any other button cancels.
             if (e.text != Key.Return && armed >= 0) { disarm-power("button"); }
+            if (menu-open) {
+                if (e.text == Key.Return) { menu-activate(); }
+                else { menu-close(); }
+                return accept;
+            }
             if (e.text == Key.Home) { go-home(); return accept; }
             if (e.text == Key.Backspace) { go-back(); return accept; }
             if (detail) {
@@ -508,5 +523,62 @@ export component App inherits Window {
             }
         }
     }
+    }
+
+    // Watched-toggle menu: a modal single-entry dialog. Enter selects; anything
+    // else closes it.
+    if menu-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000080;
+        Rectangle {
+            x: (root.width - 560px) / 2;
+            y: (root.height - 220px) / 2;
+            width: 560px;
+            height: 220px;
+            border-radius: 20px;
+            background: #16202a;
+            border-width: 2px;
+            border-color: #2a3844;
+            Text {
+                x: 32px;
+                y: 28px;
+                width: 496px;
+                text: menu-title;
+                font-size: 26px;
+                font-weight: 600;
+                color: white;
+                overflow: elide;
+            }
+            Rectangle {
+                x: 24px;
+                y: 92px;
+                width: 512px;
+                height: 64px;
+                border-radius: 12px;
+                background: #26323d;
+                Text {
+                    text: menu-action;
+                    font-size: 26px;
+                    font-weight: 600;
+                    color: #ffd54a;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    width: parent.width;
+                    height: parent.height;
+                }
+            }
+            Text {
+                x: 32px;
+                y: 176px;
+                width: 496px;
+                text: "Enter to apply · any other button to close";
+                font-size: 18px;
+                color: #7d8892;
+                horizontal-alignment: center;
+            }
+        }
     }
 }

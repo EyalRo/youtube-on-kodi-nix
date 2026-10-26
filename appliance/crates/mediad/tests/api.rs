@@ -163,6 +163,95 @@ async fn play_progress_and_unwatched_row() {
 }
 
 #[tokio::test]
+async fn watched_endpoint_sets_and_unwatches_movie_episode_show_and_season() {
+    let dir = media();
+    let app = app(dir.path());
+    let (_, rows) = json_of(&app, "GET", "/rows/tvshows", None).await;
+    let show = ids(&rows).remove(0);
+
+    // A movie: watch it, then unwatch it.
+    let (_, movies) = json_of(&app, "GET", "/rows/movies", None).await;
+    let movie = ids(&movies).remove(0);
+    assert_eq!(
+        json_of(&app, "GET", &format!("/items/{movie}/watched"), None)
+            .await
+            .1["watched"],
+        false
+    );
+    assert_eq!(
+        call(&app, "POST", &format!("/items/{movie}/watched"), None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        json_of(&app, "GET", &format!("/items/{movie}/watched"), None)
+            .await
+            .1["watched"],
+        true
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            &format!("/items/{movie}/watched?watched=false"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        json_of(&app, "GET", &format!("/items/{movie}/watched"), None)
+            .await
+            .1["watched"],
+        false
+    );
+
+    // A whole show: watch all episodes.
+    assert_eq!(
+        call(&app, "POST", &format!("/items/{show}/watched"), None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, item) = json_of(&app, "GET", &format!("/items/{show}"), None).await;
+    assert_eq!(item["item"]["watched"], 2);
+    assert!(item["episodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|e| e["watched"] == true));
+    // Unwatch one season (both episodes are season 1).
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            &format!("/items/{show}/watched?watched=false&season=1"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, item) = json_of(&app, "GET", &format!("/items/{show}"), None).await;
+    assert_eq!(item["item"]["watched"], 0);
+    assert!(item["episodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|e| e["watched"] == false));
+
+    // Unknown id 404s.
+    assert_eq!(
+        call(&app, "POST", "/items/zzz/watched", None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
 async fn unknown_items_are_404() {
     let dir = media();
     let app = app(dir.path());

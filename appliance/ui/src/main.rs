@@ -211,6 +211,7 @@ fn open_detail(ui: &App, addr: &str, id: &str, season: usize, ep: usize, cache: 
     };
     let season = season.min(detail.seasons.len() - 1);
     ui.set_detail_title(detail.title.as_str().into());
+    ui.set_detail_id(id.into());
     ui.set_seasons(ModelRc::new(VecModel::from(
         detail.seasons.iter().map(|s| SharedString::from(s.label.as_str())).collect::<Vec<_>>(),
     )));
@@ -295,6 +296,99 @@ fn listing_sig(addr: &str) -> Option<String> {
 
 fn state_dir() -> PathBuf {
     PathBuf::from(env_or("UI_STATE", "/tmp/appliance-ui"))
+}
+
+/// What the menu button should act on, given the current focus. Returns
+/// `(id, season, label)` where `season = Some(n)` means the whole season `n` of
+/// a show/channel, and `None` means the single movie/game/episode, or the whole
+/// show/channel. `None` overall means nothing is menuable here.
+fn menu_target(ui: &App) -> Option<(String, Option<i32>, String)> {
+    // A show or channel page: an episode (detail-focus 1), a season tab (0), or
+    // the top bar (-1). The bar has nothing to mark.
+    if ui.get_detail() {
+        match ui.get_detail_focus() {
+            1 => {
+                let ep = ui.get_episodes().row_data(ui.get_sel_ep() as usize)?;
+                Some((ep.id.to_string(), None, ep.title.to_string()))
+            }
+            0 => {
+                let season_label = ui
+                    .get_seasons()
+                    .row_data(ui.get_sel_season() as usize)?
+                    .to_string();
+                // "Season N" -> N; a channel year or "Specials"/"Undated" -> None.
+                let n = season_label
+                    .strip_prefix("Season ")
+                    .and_then(|s| s.trim().parse::<i32>().ok());
+                let id = ui.get_detail_id().to_string();
+                Some((id, n, season_label))
+            }
+            _ => None,
+        }
+    } else {
+        // Home screen: the focused tile. Shows/channels are the whole show;
+        // movies/games are themselves.
+        let rows = ui.get_rows();
+        let tile = rows
+            .row_data(ui.get_sel_row() as usize)?
+            .tiles
+            .row_data(ui.get_sel_col() as usize)?;
+        Some((tile.id.to_string(), None, tile.title.to_string()))
+    }
+}
+
+/// A bare HTTP/1.0 POST with a JSON body; returns Ok on 2xx.
+fn post_json(addr: &str, path: &str, body: &serde_json::Value) -> Result<(), String> {
+    let mut s = TcpStream::connect(addr).map_err(|e| format!("cannot reach mediad at {addr}: {e}"))?;
+    s.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    let payload = body.to_string();
+    write!(
+        s,
+        "POST {path} HTTP/1.0\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
+        payload.len()
+    )
+    .map_err(|e| e.to_string())?;
+    let mut raw = Vec::new();
+    s.read_to_end(&mut raw).map_err(|e| e.to_string())?;
+    let head = String::from_utf8_lossy(&raw)
+        .split("\r\n\r\n")
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    let status: u16 = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|c| c.parse().ok())
+        .ok_or("malformed status line")?;
+    if status >= 200 && status < 300 {
+        Ok(())
+    } else {
+        Err(format!("{path}: HTTP {status}"))
+    }
+}
+
+/// After a watched toggle, reload the rows (home) or reopen the page (detail) so
+/// the ✓/progress marks reflect the change.
+fn refresh_after_toggle(
+    ui: &App,
+    mediad: &str,
+    page: &std::cell::RefCell<Option<Detail>>,
+    cache_dir: &Path,
+    cache: &Path,
+    inproc: &bool,
+    play: &str,
+) {
+    let _ = (inproc, play);
+    if let Some(d) = page.borrow().as_ref() {
+        let s = ui.get_sel_season();
+        let opened = open_detail(ui, mediad, &d.id, s as usize, ui.get_sel_ep() as usize, cache_dir);
+        *page.borrow_mut() = opened;
+    } else {
+        match load_rows(mediad, cache) {
+            Ok(rows) => ui.set_rows(ModelRc::new(VecModel::from(rows))),
+            Err(e) => tracing::warn!(error = %e, "cannot reload rows after watched toggle"),
+        }
+    }
 }
 
 fn restore_focus() -> (i32, i32) {
@@ -418,8 +512,9 @@ fn watch_remote(ui: slint::Weak<App>) {
     use std::sync::Mutex;
     const KEY_BACK: u16 = 158;
     const KEY_HOMEPAGE: u16 = 172;
+    const KEY_MENU: u16 = 139;
     // The remote shows up as several devices; one press must act once.
-    static LAST: Mutex<[Option<std::time::Instant>; 2]> = Mutex::new([None, None]);
+    static LAST: Mutex<[Option<std::time::Instant>; 3]> = Mutex::new([None, None, None]);
     let Ok(dir) = std::fs::read_dir("/dev/input") else {
         tracing::warn!("cannot list /dev/input; the remote's back and home buttons will not work");
         return;
@@ -452,6 +547,7 @@ fn watch_remote(ui: slint::Weak<App>) {
                 let slot = match code {
                     KEY_BACK => 0,
                     KEY_HOMEPAGE => 1,
+                    KEY_MENU => 2,
                     _ => continue,
                 };
                 {
@@ -461,9 +557,11 @@ fn watch_remote(ui: slint::Weak<App>) {
                     }
                     last[slot] = Some(std::time::Instant::now());
                 }
-                tracing::info!(button = if slot == 0 { "back" } else { "home" }, "remote button");
+                tracing::info!(button = match slot { 0 => "back", 1 => "home", _ => "menu" }, "remote button");
                 let _ = ui.upgrade_in_event_loop(move |ui| {
-                    if slot == 0 { ui.invoke_go_back() } else { ui.invoke_go_home() }
+                    if slot == 0 { ui.invoke_go_back() }
+                    else if slot == 1 { ui.invoke_go_home() }
+                    else { ui.invoke_menu() }
                 });
             }
             tracing::warn!(device = %path.display(), "input device closed");
@@ -611,6 +709,71 @@ fn main() -> Result<(), slint::PlatformError> {
                 *page.borrow_mut() = opened;
             } else {
                 launch(&ui, tile.id.as_str(), inproc, &play);
+            }
+        });
+    }
+
+    // The watched-toggle menu. Pressing menu on a highlighted tile or an episode
+    // (or a season tab) opens a one-entry menu: "Mark watched"/"Mark unwatched",
+    // decided by the target's current watched state. Shows and seasons are
+    // groupings: a show is watched when all its episodes are.
+    {
+        let (weak, mediad, page, cache_dir, cache, inproc, play) = (
+            ui.as_weak(),
+            mediad.clone(),
+            page.clone(),
+            cache.join("episodes"),
+            cache.clone(),
+            inproc,
+            play.clone(),
+        );
+        ui.on_menu({
+            let (weak, mediad) = (weak.clone(), mediad.clone());
+            move || {
+                let Some(ui) = weak.upgrade() else { return };
+                // A target is (id, season, label). season = Some(n) means a season tab
+                // of a show/channel; None means the whole thing (tile or episode).
+                let target = menu_target(&ui);
+                let Some((id, season, label)) = target else {
+                    tracing::debug!("menu pressed but nothing is menuable here");
+                    return;
+                };
+                let season_q = season.map(|s| format!("&season={s}")).unwrap_or_default();
+                let watched = get_json(&mediad, &format!("/items/{id}/watched{season_q}"))
+                    .and_then(|v| v["watched"].as_bool().ok_or_else(|| "no watched field".to_string()))
+                    .unwrap_or(false);
+                ui.set_menu_title(format!("{label}").into());
+                ui.set_menu_action(if watched { "Mark unwatched".into() } else { "Mark watched".into() });
+                ui.set_menu_open(true);
+                tracing::info!(id, season, watched, "menu opened");
+            }
+        });
+        ui.on_menu_close({
+            let weak = weak.clone();
+            move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_menu_open(false);
+                }
+            }
+        });
+        ui.on_menu_activate({
+            let (weak, mediad) = (weak.clone(), mediad.clone());
+            move || {
+                let Some(ui) = weak.upgrade() else { return };
+                let Some((id, season, _)) = menu_target(&ui) else { return };
+                let watching = ui.get_menu_action().as_str().starts_with("Mark watched");
+                let base = format!("/items/{id}/watched");
+                let uri = match (season, watching) {
+                    (Some(s), true) => format!("{base}?season={s}"),
+                    (Some(s), false) => format!("{base}?season={s}&watched=false"),
+                    (None, true) => base,
+                    (None, false) => format!("{base}?watched=false"),
+                };
+                let res = post_json(&mediad, &uri, &serde_json::json!({}));
+                tracing::info!(id, season, watching, result = ?res, "watched toggle applied");
+                ui.set_menu_open(false);
+                // Refresh whatever page is open so the ✓/progress marks move.
+                refresh_after_toggle(&ui, &mediad, &page, &cache_dir, &cache, &inproc, &play);
             }
         });
     }
