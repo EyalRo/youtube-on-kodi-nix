@@ -630,7 +630,7 @@ fn main() -> Result<(), slint::PlatformError> {
     #[cfg(appliance_debug)]
     ui.on_key_debug(|text| {
         let codes: Vec<u32> = text.chars().map(u32::from).collect();
-        tracing::debug!(?codes, "remote button reached the UI");
+        debug_log!(?codes, "remote button reached the UI");
     });
     ui.on_arm(|action| power_event("armed", action.as_str(), "press select again within 3 s to confirm"));
     ui.on_disarm(|action, why| power_event("cancelled", action.as_str(), why.as_str()));
@@ -735,13 +735,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 // of a show/channel; None means the whole thing (tile or episode).
                 let target = menu_target(&ui);
                 let Some((id, season, label)) = target else {
-                    tracing::debug!("menu pressed but nothing is menuable here");
+                    debug_log!("menu pressed but nothing is menuable here");
                     return;
                 };
                 let season_q = season.map(|s| format!("&season={s}")).unwrap_or_default();
                 let watched = get_json(&mediad, &format!("/items/{id}/watched{season_q}"))
                     .and_then(|v| v["watched"].as_bool().ok_or_else(|| "no watched field".to_string()))
-                    .unwrap_or(false);
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(id, error = %e, "cannot read watched state; assuming unwatched");
+                        false
+                    });
                 ui.set_menu_title(format!("{label}").into());
                 ui.set_menu_action(if watched { "Mark unwatched".into() } else { "Mark watched".into() });
                 ui.set_menu_open(true);
@@ -770,7 +773,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     (None, false) => format!("{base}?watched=false"),
                 };
                 let res = post_json(&mediad, &uri, &serde_json::json!({}));
-                tracing::info!(id, season, watching, result = ?res, "watched toggle applied");
+                match &res {
+                    Ok(()) => tracing::info!(id, season, watching, "watched toggle applied"),
+                    Err(e) => tracing::error!(id, season, watching, error = %e, "watched toggle failed"),
+                }
                 ui.set_menu_open(false);
                 // Refresh whatever page is open so the ✓/progress marks move.
                 refresh_after_toggle(&ui, &mediad, &page, &cache_dir, &cache, &inproc, &play);
