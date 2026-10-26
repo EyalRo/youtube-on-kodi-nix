@@ -47,9 +47,10 @@ in
       description = "Extra mpv arguments, appended after the player's defaults.";
     };
 
-    # RetroArch with the MVP libretro cores (NES, SNES, Genesis/SMS/Game Gear,
-    # GB/GBC/GBA). snes9x and genesis-plus-gx are `unfreeRedistributable`, so the
-    # host config must allow unfree (nixpkgs.config.allowUnfree). Override with any
+    # RetroArch with the libretro cores: NES, SNES, Genesis/SMS/Game Gear,
+    # GB/GBC/GBA, and N64 (mupen64plus-next). snes9x and genesis-plus-gx are
+    # `unfreeRedistributable`, so the host config must allow unfree
+    # (nixpkgs.config.allowUnfree). Override with any
     # `pkgs.retroarch.withCores`-style package.
     retroarch = mkOption {
       type = types.package;
@@ -58,6 +59,7 @@ in
         cores.snes9x
         cores.genesis-plus-gx
         cores.mgba
+        cores.mupen64plus
       ]);
       description = "RetroArch package (with libretro cores) used for game playback.";
     };

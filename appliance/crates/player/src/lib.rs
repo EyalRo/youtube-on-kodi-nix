@@ -69,13 +69,15 @@ pub struct Config {
     pub progress_interval: Duration,
 }
 
-/// The libretro core for a system, by file stem. N64 is deliberately absent (post-MVP).
+/// The libretro core for a system, by file stem (matches the `<core>_libretro.so`
+/// nixpkgs installs; see `kiosk.nix`). mupen64plus-next is the N64 core.
 pub fn core_for(system: &str) -> Option<&'static str> {
     Some(match system {
         "nes" => "nestopia",
         "snes" => "snes9x",
         "genesis" | "sms" | "gamegear" => "genesis_plus_gx",
         "gb" | "gbc" | "gba" => "mgba",
+        "n64" => "mupen64plus-next",
         _ => return None,
     })
 }
@@ -359,7 +361,17 @@ mod tests {
             ]
         );
         p.system = Some("n64".into());
-        assert!(retroarch_args(&cfg(), &p).is_err());
+        assert_eq!(
+            retroarch_args(&cfg(), &p).unwrap(),
+            [
+                "--video-driver=drm",
+                "--fullscreen",
+                "-L",
+                "/cores/mupen64plus-next_libretro.so",
+                "--",
+                "/media/movies/Alien.mkv"
+            ]
+        );
         p.system = None;
         assert!(retroarch_args(&cfg(), &p).is_err());
     }

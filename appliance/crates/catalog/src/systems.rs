@@ -90,7 +90,7 @@ pub const SYSTEMS: &[System] = &[
         exts: &["z64", "n64", "v64"],
         folder_exts: &[],
         aliases: &["n64", "nintendo64"],
-        playable: false,
+        playable: true,
     },
 ];
 

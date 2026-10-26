@@ -315,9 +315,9 @@ mod tests {
     }
 
     #[test]
-    fn non_playable_games_are_hidden_from_rows_and_everything() {
-        // N64 has no libretro core yet (post-MVP): it is scanned and stored, but
-        // must not appear in any row, or the UI would offer games that cannot launch.
+    fn n64_games_are_playable_and_shown_in_rows() {
+        // N64 has a libretro core (mupen64plus-next) since 2026-10-26, so its
+        // games now appear in the games/games:n64/everything rows.
         let c = vec![
             game("GoldenEye", "n64", d(1997, 8, 25)),
             game("Aidyn", "n64", None),
@@ -325,18 +325,16 @@ mod tests {
         ];
         let rows = list_rows(&c);
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
-        assert!(!ids.contains(&"games:n64"), "no row for a system without a core");
-        assert!(
-            !ids.contains(&"games") || rows.iter().find(|r| r.id == "games").unwrap().count == 1,
-            "games row holds only playable games"
-        );
-        // The N64 games are absent from the games and everything rows.
+        assert!(ids.contains(&"games:n64"), "N64 has a core, so it gets a row");
+        // The N64 games appear in the games and everything rows.
         for row in &rows {
             for item in build_row(&row.id, &c).unwrap() {
-                assert_ne!(item.system.as_deref(), Some("n64"));
+                if item.system.as_deref() == Some("n64") {
+                    assert!(row.id == "games" || row.id == "games:n64" || row.id == "everything");
+                }
             }
         }
-        // They remain in the underlying catalog (scanning keeps them for later).
-        assert_eq!(c.iter().filter(|i| i.system.as_deref() == Some("n64")).count(), 2);
+        let games: Vec<Item> = build_row("games", &c).unwrap();
+        assert_eq!(games.len(), 3, "all three games are playable");
     }
 }
