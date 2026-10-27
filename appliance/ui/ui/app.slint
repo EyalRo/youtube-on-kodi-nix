@@ -80,6 +80,8 @@ component BarButton inherits Rectangle {
     in property <bool> focused;
     in property <bool> armed;
     in property <string> commands;
+    // A dot on the corner: something here wants attention (an upgrade is available).
+    in property <bool> badge;
     width: 60px;
     height: 60px;
     border-radius: 14px;
@@ -89,6 +91,16 @@ component BarButton inherits Rectangle {
     Glyph {
         commands: root.commands;
         tint: root.focused || root.armed ? white : #7d8892;
+    }
+    if badge: Rectangle {
+        x: parent.width - 20px;
+        y: 6px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: #e50914;
+        border-width: 2px;
+        border-color: #0e1318;
     }
 }
 
@@ -126,6 +138,8 @@ export component App inherits Window {
     callback menu-close();
     // The settings page (top bar, first button): for now the appliance version.
     in property <string> version: "";
+    // The newer version waiting to be installed; empty when the appliance is up to date.
+    in property <string> available: "";
     in-out property <bool> settings-open: false;
     // Debug builds log every remote button the UI receives (the text of the key event).
     callback key-debug(string);
@@ -338,6 +352,7 @@ export component App inherits Window {
             }
             BarButton {
                 focused: on-bar && bar-sel == 1;
+                badge: available != "";
                 // sliders
                 commands: "M4 7 H6 M10 7 H20 M8 7 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M4 12 H14 M18 12 H20 M16 12 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M4 17 H8 M12 17 H20 M10 17 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0";
             }
@@ -567,9 +582,9 @@ export component App inherits Window {
         background: #00000080;
         Rectangle {
             x: (root.width - 560px) / 2;
-            y: (root.height - 220px) / 2;
+            y: (root.height - 280px) / 2;
             width: 560px;
-            height: 220px;
+            height: 280px;
             border-radius: 20px;
             background: #16202a;
             border-width: 2px;
@@ -587,13 +602,21 @@ export component App inherits Window {
                 x: 32px;
                 y: 92px;
                 width: 496px;
-                text: "Version " + version;
+                text: "Installed version " + version;
                 font-size: 26px;
                 color: #ffd54a;
             }
             Text {
                 x: 32px;
-                y: 176px;
+                y: 140px;
+                width: 496px;
+                text: available != "" ? "Upgrade available: " + available : "Up to date";
+                font-size: 26px;
+                color: available != "" ? #e50914 : #7d8892;
+            }
+            Text {
+                x: 32px;
+                y: 236px;
                 width: 496px;
                 text: "any button to close";
                 font-size: 18px;

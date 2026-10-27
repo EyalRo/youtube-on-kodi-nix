@@ -65,10 +65,12 @@ jobs:
           install -m755 appliance/ui/session.sh $d/ui/session.sh
           strip $d/backend/bin/* $d/ui/bin/*
           tar -C dist -czf appliance-x86_64-linux.tar.gz appliance
+          # The version the UI compares itself against (see services.media-appliance.updateCheck).
+          sed -n 's/^version = "\(.*\)"/\1/p' appliance/Cargo.toml | head -n1 > VERSION
       - name: Publish as `latest`
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --cleanup-tag --yes || true
-          gh release create latest appliance-x86_64-linux.tar.gz --target "$GITHUB_SHA" \
+          gh release create latest appliance-x86_64-linux.tar.gz VERSION --target "$GITHUB_SHA" \
             --title "latest" --notes "Appliance binaries built from $GITHUB_SHA."

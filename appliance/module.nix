@@ -6,6 +6,7 @@ let
   cfg = config.services.media-appliance;
   inherit (lib) mkEnableOption mkOption mkIf types;
   ytsyncEnabled = cfg.ytsync.enable;
+  debugBuild = cfg.package.debug or false;
 in
 {
   options.services.media-appliance = {
@@ -61,6 +62,29 @@ in
       type = types.str;
       default = "info";
       description = "Log filter (error, warn, info, debug, trace; per-target filters allowed). Logs are JSON on the journal.";
+    };
+
+    updateCheck = {
+      enable = mkEnableOption "the upgrade check: fetches the newest published version number so the UI can badge the settings button";
+
+      url = mkOption {
+        type = types.str;
+        default = "https://github.com/EyalRo/youtube-on-kodi-nix/releases/latest/download/VERSION";
+        description = "A plain-text file holding the newest published appliance version (CI publishes it beside the binaries).";
+      };
+
+      file = mkOption {
+        type = types.str;
+        default = "/var/lib/appliance-update/available-version";
+        description = "Where the fetched version is written (world-readable); the UI reads it.";
+      };
+
+      schedule = mkOption {
+        type = types.str;
+        default = if debugBuild then "*:0/5" else "*-*-* 04:30:00";
+        defaultText = lib.literalExpression ''if the package is a debug build then "*:0/5" else "*-*-* 04:30:00"'';
+        description = "systemd OnCalendar expression. Every 5 minutes on a debug build, daily otherwise.";
+      };
     };
 
     artsync = {
@@ -258,6 +282,46 @@ in
         OnBootSec = "2min";
         OnCalendar = cfg.artsync.schedule;
         Persistent = true;
+      };
+    };
+
+    # Only learns the version number; installing is a separate, verified step. A bad or missing reply
+    # leaves the previous file alone, and anything that is not a dotted version is discarded.
+    systemd.services.appliance-update-check = mkIf cfg.updateCheck.enable {
+      description = "Look up the newest published appliance version";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      path = [ pkgs.curl pkgs.coreutils pkgs.gnugrep ];
+      environment.SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
+      script = ''
+        out=${cfg.updateCheck.file}
+        v=$(curl -fsSL --max-time 30 --max-filesize 64 ${lib.escapeShellArg cfg.updateCheck.url} | head -n1 | tr -d ' \r')
+        printf '%s\n' "$v" | grep -Eq '^v?[0-9]+(\.[0-9]+){1,3}$' || { echo "unexpected reply: $v" >&2; exit 1; }
+        printf '%s\n' "$v" > "$out.tmp"
+        chmod 0644 "$out.tmp"
+        mv "$out.tmp" "$out"
+      '';
+      serviceConfig = {
+        Type = "oneshot";
+        User = cfg.user;
+        Group = cfg.group;
+        StateDirectory = "appliance-update";
+        StateDirectoryMode = "0755";
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+        TimeoutStartSec = "2min";
+      };
+    };
+
+    systemd.timers.appliance-update-check = mkIf cfg.updateCheck.enable {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "5min";
+        OnCalendar = cfg.updateCheck.schedule;
+        Persistent = true;
+        RandomizedDelaySec = if debugBuild then "0" else "30m";
       };
     };
 

@@ -15,6 +15,8 @@ src: {
     inherit src;
     nativeBuildInputs = [ autoPatchelfHook ];
     buildInputs = [ stdenv.cc.cc.lib ];
+    # CI compiles with the debug logs in, so this counts as a debug build (see ../module.nix).
+    passthru.debug = true;
     installPhase = "install -Dm755 -t $out/bin backend/bin/*";
     meta.mainProgram = "mediad";
   };

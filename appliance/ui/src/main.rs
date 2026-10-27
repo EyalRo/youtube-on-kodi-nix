@@ -36,6 +36,23 @@ fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
 }
 
+/// The numeric parts of a dotted version ("0.2.10" -> [0, 2, 10]); a leading "v" is ignored.
+fn version_parts(v: &str) -> Vec<u64> {
+    v.trim().trim_start_matches('v').split('.').map_while(|p| p.parse().ok()).collect()
+}
+
+/// The version the update checker left in `path`, if it is newer than `installed`; "" otherwise
+/// (no file, unreadable, or not an upgrade).
+fn available_upgrade(path: &str, installed: &str) -> String {
+    let Ok(text) = std::fs::read_to_string(path) else { return String::new() };
+    let offered = text.trim();
+    if !offered.is_empty() && version_parts(offered) > version_parts(installed) {
+        offered.trim_start_matches('v').to_string()
+    } else {
+        String::new()
+    }
+}
+
 /// A bare HTTP/1.0 GET: mediad is on localhost and replies with a Content-Length.
 fn get(addr: &str, path: &str) -> Result<(u16, String, Vec<u8>), String> {
     let mut s = TcpStream::connect(addr).map_err(|e| format!("cannot reach mediad at {addr}: {e}"))?;
@@ -657,6 +674,19 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let ui = App::new()?;
     ui.set_version(env!("CARGO_PKG_VERSION").into());
+    // The update checker writes the newest published version to this file; the settings button
+    // wears a badge while it is newer than ours. Polled, so it appears without a restart.
+    let update_file = env_or("UI_UPDATE_FILE", "/var/lib/appliance/available-version");
+    ui.set_available(available_upgrade(&update_file, env!("CARGO_PKG_VERSION")).into());
+    let update_poll = slint::Timer::default();
+    {
+        let (weak, file) = (ui.as_weak(), update_file.clone());
+        update_poll.start(slint::TimerMode::Repeated, Duration::from_secs(60), move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_available(available_upgrade(&file, env!("CARGO_PKG_VERSION")).into());
+            }
+        });
+    }
     // mediad may still be starting (or rescanning); show an empty UI rather than dying.
     // The rows of the last run are on disk: paint those at once (no network, no downloads) so the
     // screen is never blank while mediad answers, then replace them with the live ones.
@@ -906,3 +936,31 @@ fn main() -> Result<(), slint::PlatformError> {
 }
 
 static LAUNCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    #[test]
+    fn versions_compare_numerically() {
+        assert!(version_parts("0.2.10") > version_parts("0.2.4"));
+        assert!(version_parts("v1.0.0") > version_parts("0.9.9"));
+        assert_eq!(version_parts("0.2.4"), version_parts("v0.2.4"));
+    }
+
+    #[test]
+    fn only_a_newer_version_is_offered() {
+        let dir = std::env::temp_dir().join(format!("ui-update-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("available-version");
+        let path = f.to_str().unwrap();
+        assert_eq!(available_upgrade(path, "0.2.4"), "");
+        std::fs::write(&f, "v0.3.0\n").unwrap();
+        assert_eq!(available_upgrade(path, "0.2.4"), "0.3.0");
+        std::fs::write(&f, "0.2.4\n").unwrap();
+        assert_eq!(available_upgrade(path, "0.2.4"), "");
+        std::fs::write(&f, "0.2.3").unwrap();
+        assert_eq!(available_upgrade(path, "0.2.4"), "");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

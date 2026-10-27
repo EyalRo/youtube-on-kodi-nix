@@ -146,6 +146,7 @@ in
         # Absolute: the PAM login session resets PATH, so the unit's `path` never reaches the script.
         UI_PLAY = "${backend.package}/bin/play";
         UI_MEDIAD = backend.bind;
+        UI_UPDATE_FILE = backend.updateCheck.file;
         PLAYER_MEDIAD = backend.bind;
         PLAYER_DRM_CONNECTOR = cfg.drmConnector;
         PLAYER_AUDIO_DEVICE = cfg.audioDevice;
