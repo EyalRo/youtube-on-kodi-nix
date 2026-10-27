@@ -99,11 +99,11 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
         "--audio-channels=auto-safe",
         // Playback overlay: mpv's built-in OSC bar (progress, time, seek/pause).
         // auto = appear on interaction (buttons, seek, pause) and hide ~1s after
-        // the last interaction (hidetimeout is in ms); osd-level 3 is full OSD.
+        // the last interaction (hidetimeout is in ms); osd-level 1 keeps the OSD to the OSC (level 3 pins a permanent time/percent status line over the video).
         // The UI and mpv are separate processes (D2), so the overlay must be
         // mpv-rendered on the same DRM plane, never a Slint screen.
         "--script-opts=osc-visibility=auto,osc-hidetimeout=1000",
-        "--osd-level=3",
+        "--osd-level=1",
     ]
     .map(String::from)
     .to_vec();
@@ -337,7 +337,7 @@ mod tests {
         assert!(a.contains("--start=125.5") && a.contains("--input-ipc-server=/run/p.sock"));
         assert!(
             a.contains("--script-opts=osc-visibility=auto,osc-hidetimeout=1000")
-                && a.contains("--osd-level=3"),
+                && a.contains("--osd-level=1"),
             "the mpv OSC overlay must be enabled"
         );
         assert!(a.ends_with("-- /media/movies/Alien.mkv"));
