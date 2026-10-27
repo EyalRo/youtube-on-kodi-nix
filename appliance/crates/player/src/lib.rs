@@ -6,7 +6,7 @@ pub mod ipc;
 pub mod keys;
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -129,6 +129,13 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
 const RETROARCH_OVERRIDES: &str =
     "video_driver = \"drm\"\nvideo_fullscreen = \"true\"\nui_companion_start_on_boot = \"false\"\ndesktop_menu_enable = \"false\"\n";
 
+/// The overrides plus audio: the same ALSA device mpv plays through (the TV's HDMI). Without
+/// them RetroArch picks its own default driver and device, and the game runs silent.
+pub fn retroarch_overrides(cfg: &Config) -> String {
+    let device = cfg.audio_device.strip_prefix("alsa/").unwrap_or(&cfg.audio_device);
+    format!("{RETROARCH_OVERRIDES}audio_driver = \"alsa\"\naudio_device = \"{device}\"\naudio_enable = \"true\"\naudio_mute_enable = \"false\"\n")
+}
+
 pub fn retroarch_args(cfg: &Config, play: &Play, overrides: &Path) -> Result<Vec<String>, PlayError> {
     let system = play
         .system
@@ -249,9 +256,42 @@ fn run_mpv(cfg: &Config, play: &Play) -> Result<(), PlayError> {
     }
 }
 
+/// How loud a RetroArch log line is: `[ERROR]`, `[WARN]`, or anything else (info/debug chatter).
+/// Cores log as `[libretro ERROR]` and so on.
+fn retroarch_level(line: &str) -> tracing::Level {
+    let tag = line.trim_start().strip_prefix('[').and_then(|r| r.split_once(']')).map_or("", |(t, _)| t);
+    match tag.rsplit(' ').next().unwrap_or("") {
+        "ERROR" => tracing::Level::ERROR,
+        "WARN" => tracing::Level::WARN,
+        _ => tracing::Level::DEBUG,
+    }
+}
+
+/// Pump a RetroArch output stream into the log, a line at a time. Errors and warnings are kept in
+/// every build; the rest only exists in a debug build (where `--verbose` produces it).
+fn forward_log(stream: impl std::io::Read + Send + 'static, id: &str) -> std::thread::JoinHandle<()> {
+    use std::io::BufRead;
+    let id = id.to_string();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stream).lines().map_while(Result::ok) {
+            let line = line.trim_end();
+            if line.is_empty() {
+                continue;
+            }
+            match retroarch_level(line) {
+                tracing::Level::ERROR => tracing::error!(%id, line, "retroarch"),
+                tracing::Level::WARN => tracing::warn!(%id, line, "retroarch"),
+                _ => {
+                    applog::debug!(%id, line, "retroarch");
+                }
+            }
+        }
+    })
+}
+
 fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
     let overrides = std::env::temp_dir().join(format!("retroarch-overrides-{}.cfg", std::process::id()));
-    std::fs::write(&overrides, RETROARCH_OVERRIDES).map_err(|e| {
+    std::fs::write(&overrides, retroarch_overrides(cfg)).map_err(|e| {
         tracing::error!(path = %overrides.display(), error = %e, "cannot write retroarch overrides");
         PlayError::Launch(format!("cannot write {}: {e}", overrides.display()))
     })?;
@@ -262,13 +302,31 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         &json!({}),
     )?;
     applog::debug!(retroarch = %cfg.retroarch.display(), args = ?args, "starting retroarch");
-    let status = Command::new(&cfg.retroarch)
+    let mut child = Command::new(&cfg.retroarch)
         // nixpkgs builds RetroArch with its Qt desktop companion, which aborts with no X11/Wayland;
         // the offscreen platform lets it initialise without a display (the game uses the drm driver).
         .env("QT_QPA_PLATFORM", "offscreen")
         .args(args)
-        .status()
+        .args(applog::DEBUG_BUILD.then_some("--verbose"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| PlayError::Launch(format!("cannot start {}: {e}", cfg.retroarch.display())))?;
+    // RetroArch logs its audio/video driver choice and any device or core error to stderr;
+    // forward every line so it reaches the journal and VictoriaLogs instead of vanishing.
+    let pumps: Vec<_> = [
+        child.stdout.take().map(|s| forward_log(s, &play.id)),
+        child.stderr.take().map(|s| forward_log(s, &play.id)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let status = child
+        .wait()
+        .map_err(|e| PlayError::Launch(format!("waiting for retroarch: {e}")))?;
+    for p in pumps {
+        let _ = p.join();
+    }
     let _ = std::fs::remove_file(&overrides);
     tracing::info!(id = %play.id, %status, "retroarch exited");
     if !status.success() {
@@ -355,6 +413,22 @@ mod tests {
         let a = mpv_args(&c, &play("movie", 0.0), Path::new("/s"));
         let pos = |s: &str| a.iter().position(|x| x == s).unwrap();
         assert!(pos("--vo=null") > pos("--vo=gpu") && pos("--pause") < pos("--"));
+    }
+
+    #[test]
+    fn retroarch_plays_through_the_tv_audio_device() {
+        let o = retroarch_overrides(&cfg());
+        assert!(o.contains("audio_driver = \"alsa\"") && o.contains("audio_device = \"hdmi:CARD=PCH,DEV=0\""), "{o}");
+    }
+
+    #[test]
+    fn retroarch_log_lines_are_leveled() {
+        use tracing::Level;
+        assert_eq!(retroarch_level("[ERROR] [Audio]: Failed to open device"), Level::ERROR);
+        assert_eq!(retroarch_level("[libretro ERROR] bad rom"), Level::ERROR);
+        assert_eq!(retroarch_level("[WARN] [Audio]: Underrun"), Level::WARN);
+        assert_eq!(retroarch_level("[INFO] [Audio]: Using alsa"), Level::DEBUG);
+        assert_eq!(retroarch_level("plain text"), Level::DEBUG);
     }
 
     #[test]
