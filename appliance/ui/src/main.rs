@@ -319,6 +319,7 @@ fn load_rows(addr: &str, cache: &Path, live: bool) -> Result<Vec<RowData>, Strin
                     subtitle: it["label2"].as_str().unwrap_or_default().into(),
                     has_art: art.is_some(),
                     art: art.unwrap_or_default(),
+                    viewed: it["viewed"].as_bool().unwrap_or(false),
                 }
             })
             .collect();
@@ -420,11 +421,32 @@ fn refresh_after_toggle(
     inproc: &bool,
     play: &str,
 ) {
-    let _ = (inproc, play);
-    if let Some(d) = page.borrow().as_ref() {
-        let s = ui.get_sel_season();
-        let opened = open_detail(ui, mediad, &d.id, s as usize, ui.get_sel_ep() as usize, cache_dir);
-        *page.borrow_mut() = opened;
+    let _ = (inproc, play, cache_dir);
+    let id = page.borrow().as_ref().map(|d| d.id.clone());
+    if let Some(id) = id {
+        // Only the watched/progress marks changed: swap in fresh data and patch the visible
+        // tiles in place, keeping their already-decoded artwork (no image fetches or decodes).
+        match load_detail(mediad, &id) {
+            Ok(fresh) => {
+                let model = ui.get_episodes();
+                let by_id: std::collections::HashMap<&str, &Value> = fresh
+                    .seasons
+                    .iter()
+                    .flat_map(|s| s.episodes.iter())
+                    .filter_map(|e| Some((e["id"].as_str()?, e)))
+                    .collect();
+                for i in 0..model.row_count() {
+                    let Some(mut row) = model.row_data(i) else { continue };
+                    let Some(e) = by_id.get(row.id.as_str()) else { continue };
+                    let (pos, dur) = (e["position"].as_f64().unwrap_or(0.0), e["duration"].as_f64().unwrap_or(0.0));
+                    row.watched = e["watched"].as_bool().unwrap_or(false);
+                    row.progress = if dur > 0.0 { (pos / dur).clamp(0.0, 1.0) as f32 } else { 0.0 };
+                    model.set_row_data(i, row);
+                }
+                *page.borrow_mut() = Some(fresh);
+            }
+            Err(e) => tracing::warn!(%id, error = %e, "cannot refresh the page after watched toggle"),
+        }
     } else {
         match load_rows(mediad, cache, true) {
             Ok(rows) => ui.set_rows(ModelRc::new(VecModel::from(rows))),
