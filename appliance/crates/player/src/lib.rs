@@ -269,6 +269,54 @@ fn retroarch_level(line: &str) -> tracing::Level {
     }
 }
 
+/// Log one RetroArch line. Errors and warnings in every build; the audio and video setup lines
+/// (driver, device, rate, buffer) at info, since they are what explains choppy or silent games;
+/// the rest only in a debug build.
+fn log_retroarch_line(id: &str, line: &str) {
+    match retroarch_level(line) {
+        tracing::Level::ERROR => tracing::error!(%id, line, "retroarch"),
+        tracing::Level::WARN => tracing::warn!(%id, line, "retroarch"),
+        _ if line.contains("[Audio]") || line.contains("[Video]") || line.contains("ALSA") => {
+            tracing::info!(%id, line, "retroarch")
+        }
+        _ => {
+            applog::debug!(%id, line, "retroarch");
+        }
+    }
+}
+
+/// Follow RetroArch's log file while the game runs, so its lines reach the log live (and survive a
+/// crash or hang). Stops, after a last drain, once `stop` is set.
+fn follow_log_file(path: PathBuf, id: String, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) -> std::thread::JoinHandle<()> {
+    use std::io::BufRead;
+    use std::sync::atomic::Ordering;
+    std::thread::spawn(move || {
+        let mut reader = None;
+        loop {
+            let stopping = stop.load(Ordering::Relaxed);
+            if reader.is_none() {
+                reader = std::fs::File::open(&path).ok().map(std::io::BufReader::new);
+            }
+            if let Some(r) = reader.as_mut() {
+                let mut buf = String::new();
+                while r.read_line(&mut buf).map_or(false, |n| n > 0) {
+                    if buf.ends_with('\n') {
+                        let line = buf.trim_end();
+                        if !line.is_empty() {
+                            log_retroarch_line(&id, line);
+                        }
+                        buf.clear();
+                    }
+                }
+            }
+            if stopping {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+    })
+}
+
 /// Pump a RetroArch output stream into the log, a line at a time. Errors and warnings are kept in
 /// every build; the rest only exists in a debug build (where `--verbose` produces it).
 fn forward_log(stream: impl std::io::Read + Send + 'static, id: &str) -> std::thread::JoinHandle<()> {
@@ -280,13 +328,7 @@ fn forward_log(stream: impl std::io::Read + Send + 'static, id: &str) -> std::th
             if line.is_empty() {
                 continue;
             }
-            match retroarch_level(line) {
-                tracing::Level::ERROR => tracing::error!(%id, line, "retroarch"),
-                tracing::Level::WARN => tracing::warn!(%id, line, "retroarch"),
-                _ => {
-                    applog::debug!(%id, line, "retroarch");
-                }
-            }
+            log_retroarch_line(&id, line);
         }
     })
 }
@@ -298,18 +340,21 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         PlayError::Launch(format!("cannot write {}: {e}", overrides.display()))
     })?;
     let args = retroarch_args(cfg, play, &overrides)?;
+    let log_file = std::env::temp_dir().join(format!("retroarch-{}.log", std::process::id()));
     http::post_json(
         &cfg.mediad,
         &format!("/items/{}/played", play.id),
         &json!({}),
     )?;
     applog::debug!(retroarch = %cfg.retroarch.display(), args = ?args, "starting retroarch");
+    let _ = std::fs::remove_file(&log_file);
     let mut child = Command::new(&cfg.retroarch)
         // nixpkgs builds RetroArch with its Qt desktop companion, which aborts with no X11/Wayland;
         // the offscreen platform lets it initialise without a display (the game uses the drm driver).
         .env("QT_QPA_PLATFORM", "offscreen")
         .args(args)
-        .args(applog::DEBUG_BUILD.then_some("--verbose"))
+        // Its own log (driver choice, buffer sizes, underruns) is not on stderr; followed live below.
+        .args(["--verbose".as_ref(), "--log-file".as_ref(), log_file.as_os_str()])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -323,13 +368,18 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
     .into_iter()
     .flatten()
     .collect();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let follower = follow_log_file(log_file.clone(), play.id.clone(), stop.clone());
     let status = child
         .wait()
         .map_err(|e| PlayError::Launch(format!("waiting for retroarch: {e}")))?;
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = follower.join();
     for p in pumps {
         let _ = p.join();
     }
     let _ = std::fs::remove_file(&overrides);
+    let _ = std::fs::remove_file(&log_file);
     tracing::info!(id = %play.id, %status, "retroarch exited");
     if !status.success() {
         tracing::error!(id = %play.id, path = %play.path.display(), %status, "retroarch failed");
