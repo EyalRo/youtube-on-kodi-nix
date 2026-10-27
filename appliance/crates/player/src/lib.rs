@@ -130,10 +130,12 @@ const RETROARCH_OVERRIDES: &str =
     "video_driver = \"drm\"\nvideo_fullscreen = \"true\"\nui_companion_start_on_boot = \"false\"\ndesktop_menu_enable = \"false\"\n";
 
 /// The overrides plus audio: the same ALSA device mpv plays through (the TV's HDMI). Without
-/// them RetroArch picks its own default driver and device, and the game runs silent.
+/// them RetroArch picks its own default driver and device, and the game runs silent. The 48 kHz
+/// rate matches the HDMI sink, and the 128 ms buffer (default 64) rides out frame-time hitches
+/// that would otherwise underrun the ALSA ring and chop the sound.
 pub fn retroarch_overrides(cfg: &Config) -> String {
     let device = cfg.audio_device.strip_prefix("alsa/").unwrap_or(&cfg.audio_device);
-    format!("{RETROARCH_OVERRIDES}audio_driver = \"alsa\"\naudio_device = \"{device}\"\naudio_enable = \"true\"\naudio_mute_enable = \"false\"\n")
+    format!("{RETROARCH_OVERRIDES}audio_driver = \"alsa\"\naudio_device = \"{device}\"\naudio_enable = \"true\"\naudio_mute_enable = \"false\"\naudio_out_rate = \"48000\"\naudio_latency = \"128\"\naudio_sync = \"true\"\nvideo_vsync = \"true\"\n")
 }
 
 pub fn retroarch_args(cfg: &Config, play: &Play, overrides: &Path) -> Result<Vec<String>, PlayError> {
