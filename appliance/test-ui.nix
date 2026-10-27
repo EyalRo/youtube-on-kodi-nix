@@ -18,7 +18,7 @@ pkgs.testers.runNixOSTest {
     systemd.services."getty@tty1".enable = false;
     systemd.services."autovt@".enable = false;
     fonts.packages = [ pkgs.noto-fonts pkgs.dejavu_fonts ];
-    environment.systemPackages = [ appliance ui pkgs.mpv pkgs.ffmpeg pkgs.jq pkgs.sqlite ];
+    environment.systemPackages = [ appliance ui pkgs.mpv pkgs.coreutils pkgs.ffmpeg pkgs.jq pkgs.sqlite ];
     systemd.tmpfiles.rules = [ "d /media/movies 0755 root root -" "d /media/tv 0755 root root -" ];
     services.media-appliance = { enable = true; package = appliance; rescanSeconds = 0; };
   };
@@ -158,6 +158,19 @@ pkgs.testers.runNixOSTest {
         machine.sleep(1)
         machine.screenshot("ui-8-settings")
         assert "\"version\":\"0.2.0\"" in ui_log(), ui_log()
+
+    with subtest("a restarted UI paints from the cached rows, and the splash covers the console"):
+        ui_unit("exit")
+        machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'rows loaded'", timeout=60)
+        assert '"from_cache":true' in ui_log(), ui_log()
+        machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'rows refreshed from mediad'", timeout=30)
+        # The session paints the splash into the framebuffer (what shows between processes) and
+        # puts tty1 in graphics mode; the first pixel is the UI's background, #0e1318 as BGRX.
+        machine.execute("systemctl stop ui.service")
+        machine.succeed("fbsplash --vt-graphics")
+        machine.succeed("fbsplash $(ls /nix/store/*appliance-ui*/share/appliance-ui/logo-1400x300.gray | head -1)")
+        assert machine.succeed("head -c4 /dev/fb0 | od -An -tx1").split() == ["18", "13", "0e", "ff"]
+        machine.screenshot("ui-9-splash")
 
     with subtest("in-process handoff: does Slint release DRM master on hide()?"):
         ui_unit("inproc")

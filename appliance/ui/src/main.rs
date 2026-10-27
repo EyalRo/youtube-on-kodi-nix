@@ -69,7 +69,19 @@ fn get_json(addr: &str, path: &str) -> Result<Value, String> {
 }
 
 /// Fetch an item's artwork into the cache and decode it.
-fn load_art(addr: &str, id: &str, cache: &Path) -> Option<Image> {
+fn load_art(addr: &str, id: &str, cache: &Path, live: bool) -> Option<Image> {
+    // A poster already on disk is used as it is: decoding it is cheap, fetching it is not.
+    for ext in ["jpg", "png", "webp"] {
+        let file = cache.join(format!("{id}.{ext}"));
+        if file.exists() {
+            if let Ok(img) = Image::load_from_path(&file) {
+                return Some(img);
+            }
+        }
+    }
+    if !live {
+        return None;
+    }
     load_image(addr, &format!("/items/{id}/art"), id, cache)
 }
 
@@ -251,16 +263,33 @@ fn launch(ui: &App, id: &str, inproc: bool, play: &str) {
     }
 }
 
-fn load_rows(addr: &str, cache: &Path) -> Result<Vec<RowData>, String> {
+/// A JSON document from mediad. Live fetches are also saved under `cache`, so the next start can
+/// paint from disk (`live = false`) before mediad has answered.
+fn rows_json(addr: &str, path: &str, cache: &Path, live: bool) -> Result<Value, String> {
+    let file = cache.join("json").join(format!("{}.json", path.trim_matches('/').replace('/', "_")));
+    if !live {
+        let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        return serde_json::from_str(&text).map_err(|e| format!("{}: {e}", file.display()));
+    }
+    let v = get_json(addr, path)?;
+    let _ = std::fs::create_dir_all(cache.join("json"));
+    if let Err(e) = std::fs::write(&file, v.to_string()) {
+        tracing::warn!(file = %file.display(), error = %e, "cannot cache a listing");
+    }
+    Ok(v)
+}
+
+/// The home rows. `live = false` builds them from the cache alone (no network, no downloads).
+fn load_rows(addr: &str, cache: &Path, live: bool) -> Result<Vec<RowData>, String> {
     let _ = std::fs::create_dir_all(cache);
-    let listing = get_json(addr, "/rows")?;
+    let listing = rows_json(addr, "/rows", cache, live)?;
     let mut out = Vec::new();
     for info in listing["rows"].as_array().ok_or("no rows")? {
         if info["count"].as_u64().unwrap_or(0) == 0 {
             continue;
         }
         let id = info["id"].as_str().unwrap_or_default();
-        let row = get_json(addr, &format!("/rows/{id}"))?;
+        let row = rows_json(addr, &format!("/rows/{id}"), cache, live)?;
         let tiles: Vec<TileData> = row["items"]
             .as_array()
             .map(|a| a.as_slice())
@@ -269,7 +298,7 @@ fn load_rows(addr: &str, cache: &Path) -> Result<Vec<RowData>, String> {
             .take(MAX_TILES)
             .map(|it| {
                 let tid = it["id"].as_str().unwrap_or_default();
-                let art = it["art"].is_string().then(|| load_art(addr, tid, cache)).flatten();
+                let art = it["art"].is_string().then(|| load_art(addr, tid, cache, live)).flatten();
                 TileData {
                     id: tid.into(),
                     kind: it["kind"].as_str().unwrap_or_default().into(),
@@ -384,7 +413,7 @@ fn refresh_after_toggle(
         let opened = open_detail(ui, mediad, &d.id, s as usize, ui.get_sel_ep() as usize, cache_dir);
         *page.borrow_mut() = opened;
     } else {
-        match load_rows(mediad, cache) {
+        match load_rows(mediad, cache, true) {
             Ok(rows) => ui.set_rows(ModelRc::new(VecModel::from(rows))),
             Err(e) => tracing::warn!(error = %e, "cannot reload rows after watched toggle"),
         }
@@ -594,15 +623,37 @@ fn main() -> Result<(), slint::PlatformError> {
     let ui = App::new()?;
     ui.set_version(env!("CARGO_PKG_VERSION").into());
     // mediad may still be starting (or rescanning); show an empty UI rather than dying.
-    let rows = load_rows(&mediad, &cache).unwrap_or_else(|e| {
-        tracing::error!(error = %e, "cannot load rows");
-        Vec::new()
+    // The rows of the last run are on disk: paint those at once (no network, no downloads) so the
+    // screen is never blank while mediad answers, then replace them with the live ones.
+    let cached = load_rows(&mediad, &cache, false).ok().filter(|r| !r.is_empty());
+    let from_cache = cached.is_some();
+    let rows = cached.unwrap_or_else(|| {
+        load_rows(&mediad, &cache, true).unwrap_or_else(|e| {
+            tracing::error!(error = %e, "cannot load rows");
+            Vec::new()
+        })
     });
-    tracing::info!(rows = rows.len(), "rows loaded");
+    tracing::info!(rows = rows.len(), from_cache, "rows loaded");
     ui.set_rows(ModelRc::new(VecModel::from(rows)));
     let (r, c) = restore_focus();
     ui.set_sel_row(r.max(0));
     ui.set_sel_col(c.max(0));
+    let first_refresh = slint::Timer::default();
+    if from_cache {
+        let (weak, mediad, cache) = (ui.as_weak(), mediad.clone(), cache.clone());
+        first_refresh.start(slint::TimerMode::SingleShot, Duration::from_millis(300), move || {
+            let Some(ui) = weak.upgrade() else { return };
+            match load_rows(&mediad, &cache, true) {
+                Ok(rows) => {
+                    tracing::info!(rows = rows.len(), "rows refreshed from mediad");
+                    ui.set_rows(ModelRc::new(VecModel::from(rows)));
+                    let last = ui.get_rows().row_count() as i32 - 1;
+                    ui.set_sel_row(ui.get_sel_row().min(last));
+                }
+                Err(e) => tracing::warn!(error = %e, "cannot refresh the cached rows"),
+            }
+        });
+    }
 
     // mediad scans in the background (a NAS library takes a while the first time, and new
     // downloads arrive later), so keep checking: when its row listing changes, reload the rows.
@@ -616,7 +667,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if sig == *seen.borrow() {
                 return;
             }
-            match load_rows(&mediad, &cache) {
+            match load_rows(&mediad, &cache, true) {
                 Ok(rows) => {
                     tracing::info!(rows = rows.len(), "rows refreshed");
                     ui.set_rows(ModelRc::new(VecModel::from(rows)));

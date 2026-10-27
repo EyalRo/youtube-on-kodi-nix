@@ -7,6 +7,31 @@ let
   cfg = config.services.media-appliance.kiosk;
   backend = config.services.media-appliance;
   inherit (lib) mkEnableOption mkOption mkIf types;
+
+  # The Plymouth theme: the logo centred on the UI's background colour.
+  shmetflixTheme = pkgs.runCommand "plymouth-theme-shmetflix" { } ''
+    d=$out/share/plymouth/themes/shmetflix
+    mkdir -p $d
+    cp ${cfg.package}/share/appliance-ui/logo.png $d/logo.png
+    cat > $d/shmetflix.plymouth <<EOF
+    [Plymouth Theme]
+    Name=Shmetflix
+    Description=The Shmetflix logo on the UI background
+    ModuleName=script
+
+    [script]
+    ImageDir=$d
+    ScriptFile=$d/shmetflix.script
+    EOF
+    cat > $d/shmetflix.script <<EOF
+    Window.SetBackgroundTopColor(0.055, 0.075, 0.094);
+    Window.SetBackgroundBottomColor(0.055, 0.075, 0.094);
+    logo = Image("logo.png");
+    sprite = Sprite(logo);
+    sprite.SetX(Window.GetWidth() / 2 - logo.GetWidth() / 2);
+    sprite.SetY(Window.GetHeight() / 2 - logo.GetHeight() / 2);
+    EOF
+  '';
 in
 {
   options.services.media-appliance.kiosk = {
@@ -33,6 +58,12 @@ in
       type = types.str;
       default = "alsa/hdmi:CARD=PCH,DEV=0";
       description = "mpv audio device (`mpv --audio-device=help`).";
+    };
+
+    bootSplash = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Quiet the console and show the Shmetflix logo (Plymouth) from the bootloader until the UI draws.";
     };
 
     scaleFactor = mkOption {
@@ -80,6 +111,20 @@ in
       extraGroups = [ "audio" "input" "render" "video" ];
     };
 
+    # Nothing but the logo on the screen from the bootloader to the first UI frame: no kernel or
+    # systemd text on tty1, a Plymouth splash in the same colours as the UI (and as `fbsplash`, which
+    # keeps the screen covered between the UI and the player).
+    boot = mkIf cfg.bootSplash {
+      kernelParams = [ "quiet" "loglevel=3" "udev.log_level=3" "systemd.show_status=false" "vt.global_cursor_default=0" ];
+      consoleLogLevel = 0;
+      initrd.verbose = false;
+      plymouth = {
+        enable = true;
+        theme = "shmetflix";
+        themePackages = [ shmetflixTheme ];
+      };
+    };
+
     # tty1 belongs to the UI, not to a login prompt.
     systemd.services."getty@tty1".enable = false;
 
@@ -90,7 +135,7 @@ in
     systemd.services.appliance-ui = {
       description = "Appliance UI (DRM/KMS)";
       wantedBy = [ "multi-user.target" ];
-      after = [ "systemd-user-sessions.service" "mediad.service" "sound.target" ];
+      after = [ "systemd-user-sessions.service" "mediad.service" "sound.target" ] ++ lib.optional cfg.bootSplash "plymouth-start.service";
       wants = [ "mediad.service" ];
       conflicts = [ "getty@tty1.service" ];
       path = [ backend.package cfg.package cfg.retroarch pkgs.mpv pkgs.alsa-utils ];
@@ -112,6 +157,8 @@ in
         UI_VLOGS = cfg.victorialogs;
       };
       serviceConfig = {
+        # Plymouth lets go of the display (keeping its last frame up) just before the UI takes it.
+        ExecStartPre = mkIf cfg.bootSplash "-+${pkgs.plymouth}/bin/plymouth quit --retain-splash";
         User = cfg.user;
         PAMName = "login";
         TTYPath = "/dev/tty1";
