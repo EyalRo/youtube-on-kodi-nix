@@ -77,7 +77,9 @@ pub fn ytdlp_args(cfg: &Config, job: &Job) -> Vec<String> {
         "--sleep-requests",
         "1",
         "--match-filters",
-        "!is_live & original_url!*=/shorts/",
+        // Members-only videos cannot be fetched; skipping them here keeps yt-dlp from exiting 1 (which
+        // logged "channel sync failed" for channels that had nothing wrong).
+        "!is_live & original_url!*=/shorts/ & availability!=subscriber_only",
     ]
     .map(String::from)
     .to_vec();
@@ -484,7 +486,7 @@ mod tests {
                 && a.contains("today-30days")
         );
         assert!(a.contains("--download-archive /s/archive.txt") && a.ends_with(" U"));
-        assert!(a.contains("!is_live"));
+        assert!(a.contains("!is_live") && a.contains("availability!=subscriber_only"));
         assert!(a.contains("--no-write-playlist-metafiles"));
         assert!(a.contains("--extractor-args youtube:player_client=mweb"));
         assert!(a.contains("--max-filesize 3G") && a.contains("vcodec^=avc1"));
