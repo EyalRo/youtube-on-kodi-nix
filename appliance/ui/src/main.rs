@@ -722,6 +722,17 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.on_moved(move || tick());
     }
     ui.on_config(|| tracing::info!(version = env!("CARGO_PKG_VERSION"), "settings opened"));
+    // Look for new videos now instead of at the next timer run. `--no-block` queues the oneshot and
+    // returns; a run already in progress absorbs the request.
+    ui.on_sync(|| {
+        let cmd = env_or("UI_SYNC_CMD", "systemctl");
+        let unit = env_or("UI_SYNC_UNIT", "ytsync.service");
+        match Command::new(&cmd).args(["start", "--no-block", &unit]).status() {
+            Ok(s) if s.success() => tracing::info!(%unit, "sync requested from the top bar"),
+            Ok(s) => tracing::error!(%unit, status = %s, "sync request refused; is the polkit rule for the UI user in place?"),
+            Err(e) => tracing::error!(%unit, error = %e, "cannot run {cmd} to request a sync"),
+        }
+    });
     #[cfg(appliance_debug)]
     ui.on_key_debug(|text| {
         let codes: Vec<u32> = text.chars().map(u32::from).collect();

@@ -176,6 +176,22 @@ in
       };
     };
 
+    # The top bar's sync button starts the download job (`systemctl start --no-block ytsync.service`)
+    # as the UI user, which polkit refuses unless told otherwise. Only that one verb on that one unit.
+    security.polkit = mkIf backend.ytsync.enable {
+      enable = true;
+      extraConfig = ''
+        polkit.addRule(function(action, subject) {
+          if (action.id == "org.freedesktop.systemd1.manage-units"
+              && action.lookup("unit") == "ytsync.service"
+              && action.lookup("verb") == "start"
+              && subject.user == "${cfg.user}") {
+            return polkit.Result.YES;
+          }
+        });
+      '';
+    };
+
     services.journald.upload = mkIf (cfg.victorialogs != null) {
       enable = true;
       settings.Upload.URL = "http://${cfg.victorialogs}/insert/journald";

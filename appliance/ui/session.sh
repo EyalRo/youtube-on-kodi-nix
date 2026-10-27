@@ -9,6 +9,9 @@ here="$(dirname "$(readlink -f "$0")")"
 splash() { "$here/fbsplash" "${UI_SPLASH:-$here/../share/appliance-ui/logo-1400x300.gray}"; }
 "$here/fbsplash" --vt-graphics
 splash
+# A fresh start (boot, or the service restarting) opens on the home screen's first tile. The focus and
+# page files are only for coming back from playing something, which stays inside the loop below.
+rm -f "$state/focus" "$state/detail"
 while :; do
     rm -f "$state/launch"
     appliance-ui
