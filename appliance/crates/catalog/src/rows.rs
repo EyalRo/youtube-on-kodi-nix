@@ -177,6 +177,7 @@ mod tests {
             system: None,
             art: None,
             watched: 0,
+            viewed: false,
             unwatched_date: None,
         }
     }

@@ -212,11 +212,12 @@ impl Store {
     /// Every entry as the row engine sees it, with watch state folded in.
     pub fn items(&self) -> Result<Vec<Item>, StoreError> {
         // Per show/channel: episodes watched, and the newest still-unwatched air date.
-        let mut agg: HashMap<String, (u32, Option<NaiveDate>)> = HashMap::new();
+        let mut agg: HashMap<String, (u32, u32, Option<NaiveDate>)> = HashMap::new();
         {
             let mut stmt = self.conn.prepare(
                 "SELECT e.item_id,
                         COALESCE(SUM(ps.watched), 0),
+                        COUNT(*),
                         MAX(CASE WHEN COALESCE(ps.watched, 0) = 0 THEN e.aired END)
                  FROM episodes e LEFT JOIN play_state ps ON ps.id = e.id
                  GROUP BY e.item_id",
@@ -225,12 +226,21 @@ impl Store {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, u32>(1)?,
-                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, u32>(2)?,
+                    r.get::<_, Option<String>>(3)?,
                 ))
             })?;
             for row in rows {
-                let (id, watched, unwatched) = row?;
-                agg.insert(id, (watched, date(unwatched)));
+                let (id, watched, total, unwatched) = row?;
+                agg.insert(id, (watched, total, date(unwatched)));
+            }
+        }
+        // Movies and games carry their own flag.
+        let mut own: std::collections::HashSet<String> = std::collections::HashSet::new();
+        {
+            let mut stmt = self.conn.prepare("SELECT id FROM play_state WHERE watched = 1")?;
+            for id in stmt.query_map([], |r| r.get::<_, String>(0))? {
+                own.insert(id?);
             }
         }
         let mut stmt = self
@@ -253,7 +263,11 @@ impl Store {
             let Some(kind) = Kind::parse(&kind) else {
                 continue;
             };
-            let (watched, unwatched_date) = agg.get(&id).copied().unwrap_or((0, None));
+            let (watched, total, unwatched_date) = agg.get(&id).copied().unwrap_or((0, 0, None));
+            let viewed = match kind {
+                Kind::Show | Kind::Channel => total > 0 && watched >= total,
+                Kind::Movie | Kind::Game => own.contains(&id),
+            };
             let label2 = match kind {
                 Kind::Movie => "Movie".to_string(),
                 Kind::Show => "TV show".to_string(),
@@ -273,6 +287,7 @@ impl Store {
                 system,
                 art,
                 watched,
+                viewed,
                 unwatched_date,
             });
         }
@@ -870,6 +885,8 @@ mod tests {
         assert!(!s.is_watched("s-1", None).unwrap());
         assert_eq!(s.set_watched("s-1", None, true).unwrap(), 3);
         assert!(s.is_watched("s-1", None).unwrap());
+        assert!(s.item("s-1").unwrap().unwrap().viewed, "a show with every episode watched is viewed");
+        assert!(s.item("m-1").unwrap().unwrap().viewed == false);
         assert_eq!(s.item("s-1").unwrap().unwrap().watched, 3);
         // Unwatched all episodes of the show.
         assert_eq!(s.set_watched("s-1", None, false).unwrap(), 3);

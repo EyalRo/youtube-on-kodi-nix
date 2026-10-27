@@ -16,6 +16,8 @@ export struct TileData {
     subtitle: string,
     art: image,
     has-art: bool,
+    /// Everything in it has been watched.
+    viewed: bool,
 }
 
 export struct RowData {
@@ -48,6 +50,15 @@ component Poster inherits Rectangle {
         width: parent.width - 24px;
         horizontal-alignment: center;
         vertical-alignment: center;
+    }
+    if data.viewed: Rectangle {
+        x: parent.width - 44px;
+        y: 8px;
+        width: 34px;
+        height: 34px;
+        border-radius: 17px;
+        background: #000000a0;
+        Text { text: "✓"; color: white; font-size: 22px; horizontal-alignment: center; vertical-alignment: center; }
     }
 }
 

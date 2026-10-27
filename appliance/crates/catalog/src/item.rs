@@ -124,6 +124,9 @@ pub struct Item {
     pub art: Option<String>,
     /// Episodes watched (shows and channels).
     pub watched: u32,
+    /// Everything it holds has been watched: a movie or game by its own flag, a show or
+    /// channel once all of its episodes are.
+    pub viewed: bool,
     /// Newest aired episode that is still unwatched.
     pub unwatched_date: Option<NaiveDate>,
 }
