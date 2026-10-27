@@ -121,6 +121,10 @@ export component App inherits Window {
     in-out property <int> bar-sel: 0;
     property <int> armed: -1;
     property <string> notice;
+    // True from choosing a video until the display is handed over: a full-screen spinner that
+    // swallows the remote.
+    in-out property <bool> loading: false;
+    property <int> spin: 0;
 
     background: #0e1318;
     forward-focus: fs;
@@ -188,6 +192,7 @@ export component App inherits Window {
     fs := FocusScope {
         key-pressed(e) => {
             key-debug(e.text);
+            if (loading) { return accept; }
             if (settings-open) { settings-open = false; return accept; }
             // Reboot and shutdown need a second select; any other button cancels.
             if (e.text != Key.Return && armed >= 0) { disarm-power("button"); }
@@ -629,6 +634,29 @@ export component App inherits Window {
                 color: #7d8892;
                 horizontal-alignment: center;
             }
+        }
+    }
+
+    spin-timer := Timer {
+        running: loading;
+        interval: 90ms;
+        triggered => { spin = mod(spin + 1, 8); }
+    }
+
+    if loading: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #0e1318;
+        for i in 8: Rectangle {
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            x: root.width / 2 - 10px + 44px * cos(45deg * i);
+            y: root.height / 2 - 10px + 44px * sin(45deg * i);
+            background: white;
+            opacity: 1.0 - mod(spin - i + 8, 8) * 0.12;
         }
     }
 }

@@ -253,6 +253,7 @@ fn launch(ui: &App, id: &str, inproc: bool, play: &str) {
             _ => tracing::error!(?status, %id, "play failed"),
         }
         let _ = ui.show();
+        ui.set_loading(false);
     } else {
         // Without this file the supervisor will not run `play`, so the press would do nothing.
         if let Err(e) = std::fs::write(dir.join("launch"), id) {
@@ -261,6 +262,18 @@ fn launch(ui: &App, id: &str, inproc: bool, play: &str) {
         let _ = slint::quit_event_loop();
         LAUNCH.store(true, std::sync::atomic::Ordering::SeqCst);
     }
+}
+
+/// Show the loader, give it a moment to reach the screen, then hand the display over: the UI exits
+/// right after and its last frame stays up until the splash is painted.
+fn begin_launch(ui: &App, id: &str, inproc: bool, play: &str) {
+    ui.set_loading(true);
+    let (weak, id, play) = (ui.as_weak(), id.to_string(), play.to_string());
+    slint::Timer::single_shot(Duration::from_millis(250), move || {
+        if let Some(ui) = weak.upgrade() {
+            launch(&ui, &id, inproc, &play);
+        }
+    });
 }
 
 /// A JSON document from mediad. Live fetches are also saved under `cache`, so the next start can
@@ -745,7 +758,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(d) = page.borrow().as_ref() {
                 remember_page(&d.id, ui.get_sel_season(), i);
             }
-            launch(&ui, ep.id.as_str(), inproc, &play);
+            begin_launch(&ui, ep.id.as_str(), inproc, &play);
         });
     }
     {
@@ -768,7 +781,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 *page.borrow_mut() = opened;
             } else {
-                launch(&ui, tile.id.as_str(), inproc, &play);
+                begin_launch(&ui, tile.id.as_str(), inproc, &play);
             }
         });
     }
