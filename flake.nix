@@ -157,6 +157,10 @@
       #   youtube-on-kodi.lib.skinFor pkgs.kodi-gbm.packages
       lib.skinFor = kodiPackages: kodiPackages.callPackage ./skin.nix { };
 
+      # The appliance binaries CI compiled (the `latest` release), instead of building from source:
+      #   (youtube-on-kodi.lib.prebuilt pkgs inputs.appliance-bin).appliance / .appliance-ui
+      lib.prebuilt = pkgs: src: pkgs.callPackage ./appliance/prebuilt.nix { } src;
+
       nixosModules.default = import ./module.nix;
 
       # Media appliance back end (mediad + ytsync). Set `services.media-appliance.package`
