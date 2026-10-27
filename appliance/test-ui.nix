@@ -138,6 +138,27 @@ pkgs.testers.runNixOSTest {
         machine.succeed("rm -rf /media/tv/*")
         machine.succeed(f"curl -sf -XPOST {API}/rescan")
 
+    with subtest("the menu button toggles watched, and settings shows the version"):
+        ui_unit("exit")
+        machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'rows loaded'", timeout=60)
+        machine.sleep(3)
+        before = int(machine.succeed("sqlite3 /persist/mediad/mediad.sqlite 'select count(*) from play_state where watched=1'").strip())
+        machine.send_key("menu")
+        machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'menu opened'", timeout=30)
+        machine.sleep(1)
+        machine.screenshot("ui-7-menu")
+        machine.send_key("ret")
+        machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'watched toggle applied'", timeout=30)
+        after = int(machine.succeed("sqlite3 /persist/mediad/mediad.sqlite 'select count(*) from play_state where watched=1'").strip())
+        assert after != before, (before, after, ui_log())
+        machine.send_key("up")      # onto the top bar
+        machine.sleep(1)
+        machine.send_key("ret")     # settings
+        machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'settings opened'", timeout=30)
+        machine.sleep(1)
+        machine.screenshot("ui-8-settings")
+        assert "\"version\":\"0.2.0\"" in ui_log(), ui_log()
+
     with subtest("in-process handoff: does Slint release DRM master on hide()?"):
         ui_unit("inproc")
         machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'rows loaded'", timeout=60)

@@ -90,5 +90,26 @@ pkgs.testers.runNixOSTest {
         state = machine.succeed(f"sqlite3 /persist/mediad/mediad.sqlite \"select watched, position from play_state where id='{short_id}'\"").strip()
         assert state == "1|0.0", state
         assert api(f"/items/{short_id}/play")["resume_position"] == 0
+
+    with subtest("a game launches RetroArch with the DRM config, and Qt needs no display"):
+        machine.succeed("mkdir -p /media/roms/snes /cores")
+        machine.succeed("echo rom > '/media/roms/snes/Test Game.sfc'")
+        fake = [
+            "#!/bin/sh",
+            'echo "QT=$QT_QPA_PLATFORM" > /tmp/ra.out',
+            'for a in "$@"; do echo "$a" >> /tmp/ra.out; done',
+            'cat "''${1#--appendconfig=}" >> /tmp/ra.out',
+        ]
+        machine.succeed("rm -f /tmp/fake-ra")
+        for line in fake:
+            machine.succeed("printf '%s\\n' '" + line + "' >> /tmp/fake-ra")
+        machine.succeed("chmod +x /tmp/fake-ra")
+        machine.succeed(f"curl -sf -XPOST {API}/rescan")
+        gid = api("/rows/games")["items"][0]["id"]
+        machine.succeed(f"PLAYER_RETROARCH=/tmp/fake-ra PLAYER_CORE_DIR=/cores play {gid}")
+        out = machine.succeed("cat /tmp/ra.out")
+        assert "QT=offscreen" in out and "snes9x_libretro.so" in out, out
+        assert 'video_driver = "drm"' in out, out
+        assert machine.execute("ls /tmp/retroarch-overrides-*")[0] != 0, "overrides file left behind"
   '';
 }
