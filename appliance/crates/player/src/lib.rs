@@ -80,6 +80,7 @@ pub fn core_for(system: &str) -> Option<&'static str> {
         "genesis" | "sms" | "gamegear" => "genesis_plus_gx",
         "gb" | "gbc" | "gba" => "mgba",
         "n64" => "mupen64plus_next",
+        "neogeo" => "fbneo",
         _ => return None,
     })
 }

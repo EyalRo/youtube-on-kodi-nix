@@ -1,6 +1,9 @@
 use std::sync::LazyLock;
 
+use chrono::NaiveDate;
 use regex::Regex;
+
+use crate::date::parse_release;
 
 /// A game system: how to recognise its ROM folder and files.
 pub struct System {
@@ -92,6 +95,15 @@ pub const SYSTEMS: &[System] = &[
         aliases: &["n64", "nintendo64"],
         playable: true,
     },
+    System {
+        id: "neogeo",
+        name: "Neo Geo",
+        exts: &[],
+        // Arcade sets are zips, too ambiguous to claim outside a Neo Geo folder.
+        folder_exts: &["zip", "7z"],
+        aliases: &["neogeo", "neogeoaes", "neogeomvs", "snkneogeo"],
+        playable: true,
+    },
 ];
 
 pub fn system_by_id(id: &str) -> Option<&'static System> {
@@ -128,8 +140,38 @@ pub fn system_for(folder: &str, ext: &str) -> Option<&'static System> {
 /// Region/revision tags: `(USA, Europe)`, `[!]`.
 static TAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*[\(\[][^\)\]]*[\)\]]").unwrap());
 
+/// A TOSEC name (`Title, The v1.03 (demo) (1986-06-21)(Publisher)...`): the title as people
+/// say it and the release date from the date tag. A date tag followed by a publisher tag
+/// is what tells a TOSEC name from any other; `None` for other names.
+pub fn tosec(filename: &str) -> Option<(String, Option<NaiveDate>)> {
+    static DATE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\((\d{4}|\d{3}x|\d{2}xx)(?:-(\d{2}|\d[x]))?(?:-(\d{2}|[\dx]{2}))?\)\s*\(").unwrap()
+    });
+    static VERSION: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\s+(?:v\d[\w.]*|rev\s*\w+)\s*$").unwrap());
+    static ARTICLE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^(.+), (The|A|An|Der|Die|Das|Le|La|Les|El|Il)$").unwrap());
+    let caps = DATE.captures(filename)?;
+    let head = filename[..caps.get(0)?.start()].trim_end();
+    let head = head.strip_suffix("(demo)").unwrap_or(head).trim_end();
+    let head = VERSION.replace(head, "");
+    let title = match ARTICLE.captures(&head) {
+        Some(a) => format!("{} {}", &a[2], &a[1]),
+        None => head.to_string(),
+    };
+    if title.is_empty() {
+        return None;
+    }
+    let full = [Some(&caps[1]), caps.get(2).map(|m| m.as_str()), caps.get(3).map(|m| m.as_str())];
+    let text: Vec<&str> = full.iter().map_while(|p| *p).take_while(|p| p.bytes().all(|b| b.is_ascii_digit())).collect();
+    Some((title, parse_release(&text.join("-"))))
+}
+
 /// File name without extension or tags: `Sonic The Hedgehog (USA, Europe) [!].md` -> `Sonic The Hedgehog`.
 pub fn display_title(filename: &str) -> String {
+    if let Some((title, _)) = tosec(filename) {
+        return title;
+    }
     let stem = match filename.rfind('.') {
         Some(i) if i > 0 => &filename[..i],
         _ => filename,
@@ -170,6 +212,15 @@ mod tests {
     }
 
     #[test]
+    fn neo_geo_zips_need_the_folder() {
+        let neo = system_by_id("neogeo").unwrap();
+        assert_eq!(system_for("Neo Geo", "zip").unwrap().id, "neogeo");
+        assert!(neo.accepts("zip", true));
+        assert!(!neo.accepts("zip", false));
+        assert!(system_for("misc", "zip").is_none());
+    }
+
+    #[test]
     fn extension_is_the_fallback() {
         assert_eq!(system_for("misc", "nes").unwrap().id, "nes");
         assert!(system_for("misc", "xyz").is_none());
@@ -180,6 +231,17 @@ mod tests {
         for ext in ["z64", "v64", "n64"] {
             assert_eq!(system_for("whatever", ext).unwrap().id, "n64");
         }
+    }
+
+    #[test]
+    fn tosec_names_give_title_and_date() {
+        let (t, d) = tosec("Legend of TOSEC, The v1.03b (demo) (1986-06-21)(Devstudio)(US)(PD)[cr PDX].adf").unwrap();
+        assert_eq!(t, "The Legend of TOSEC");
+        assert_eq!(d, NaiveDate::from_ymd_opt(1986, 6, 21));
+        assert_eq!(display_title("Sonic (1991)(Sega)(JP).md"), "Sonic");
+        assert_eq!(tosec("Sonic (1991)(Sega)(JP).md").unwrap().1, NaiveDate::from_ymd_opt(1991, 1, 1));
+        assert_eq!(tosec("Amidar (19xx)(Devstudio).zip").unwrap().1, None);
+        assert!(tosec("Sonic The Hedgehog (USA, Europe) [!].md").is_none());
     }
 
     #[test]

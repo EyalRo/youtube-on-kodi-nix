@@ -91,6 +91,7 @@ in
         cores.genesis-plus-gx
         cores.mgba
         cores.mupen64plus
+        cores.fbneo
       ]);
       description = "RetroArch package (with libretro cores) used for game playback.";
     };

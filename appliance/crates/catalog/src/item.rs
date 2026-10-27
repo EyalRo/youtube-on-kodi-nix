@@ -45,6 +45,8 @@ pub enum DateSource {
     InfoJson,
     /// Only the year was known (folder name).
     Year,
+    /// A TOSEC-named game file: the `(1986)` date tag.
+    Filename,
     /// A game sidecar file (`Game.json`).
     Sidecar,
     /// A release database (libretro-database `.dat`).
@@ -60,6 +62,7 @@ impl DateSource {
             DateSource::Nfo => "nfo",
             DateSource::InfoJson => "info_json",
             DateSource::Year => "year",
+            DateSource::Filename => "filename",
             DateSource::Sidecar => "sidecar",
             DateSource::Database => "database",
             DateSource::Mtime => "mtime",
@@ -72,6 +75,7 @@ impl DateSource {
             "nfo" => DateSource::Nfo,
             "info_json" => DateSource::InfoJson,
             "year" => DateSource::Year,
+            "filename" => DateSource::Filename,
             "sidecar" => DateSource::Sidecar,
             "database" => DateSource::Database,
             "mtime" => DateSource::Mtime,

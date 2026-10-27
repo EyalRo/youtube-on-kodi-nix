@@ -105,6 +105,7 @@ pub fn libretro_dir(system: &str) -> Option<&'static str> {
         "gbc" => "Nintendo - Game Boy Color",
         "gba" => "Nintendo - Game Boy Advance",
         "n64" => "Nintendo - Nintendo 64",
+        "neogeo" => "SNK - Neo Geo",
         _ => return None,
     })
 }

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use catalog::{
-    DateSource, Kind, MediaEntry, display_title, parse_release, system_for, system_for_folder,
+    DateSource, Kind, MediaEntry, display_title, tosec, parse_release, system_for, system_for_folder,
 };
 use chrono::NaiveDate;
 use walkdir::WalkDir;
@@ -69,11 +69,17 @@ pub fn scan(media_root: &Path, db: &ReleaseDb) -> Scan {
             );
             continue;
         }
+        // The Neo Geo BIOS set lives beside the games but is not one.
+        if system.id == "neogeo" && file_name(path).eq_ignore_ascii_case("neogeo.zip") {
+            continue;
+        }
         let stem = file_stem(path);
         let (date, source) = if let Some(d) = sidecar_date(path) {
             (Some(d), DateSource::Sidecar)
         } else if let Some(d) = db.lookup(&stem) {
             (Some(d), DateSource::Database)
+        } else if let Some((_, Some(d))) = tosec(&file_name(path)) {
+            (Some(d), DateSource::Filename)
         } else {
             undated += 1;
             (None, DateSource::None)
