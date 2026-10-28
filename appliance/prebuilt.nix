@@ -6,7 +6,7 @@
 # `src` is the unpacked release tarball: backend/bin/* and ui/{bin/*,session.sh}. These are
 # drop-in replacements for packages.appliance and packages.appliance-ui.
 { lib, stdenv, autoPatchelfHook, makeWrapper, imagemagick, dejavu_fonts, alsa-utils
-, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd }:
+, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd, mpv-unwrapped }:
 
 src: {
   appliance = stdenv.mkDerivation {
@@ -14,7 +14,8 @@ src: {
     version = "latest";
     inherit src;
     nativeBuildInputs = [ autoPatchelfHook ];
-    buildInputs = [ stdenv.cc.cc.lib ];
+    # `play` links libmpv in-process (the `mpv` crate); mpv-unwrapped's .out ships libmpv.so.2.
+    buildInputs = [ stdenv.cc.cc.lib mpv-unwrapped ];
     # CI compiles with the debug logs in, so this counts as a debug build (see ../module.nix).
     passthru.debug = true;
     installPhase = "install -Dm755 -t $out/bin backend/bin/*";
