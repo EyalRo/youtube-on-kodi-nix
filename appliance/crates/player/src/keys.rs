@@ -42,6 +42,7 @@ pub fn decode(event: &[u8; EVENT_SIZE]) -> Option<(u16, bool)> {
 }
 
 fn send(socket: &PathBuf, command: &Value) {
+    tracing::info!(socket = %socket.display(), command = %command, "sending key command over IPC");
     if let Ok(mut s) = UnixStream::connect(socket) {
         let _ = writeln!(s, "{command}");
         // mpv writes a reply for every command. If we drop the handle right after

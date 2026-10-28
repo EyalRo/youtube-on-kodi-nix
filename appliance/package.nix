@@ -1,11 +1,11 @@
 # The appliance's binaries (mediad, ytsync) from the Cargo workspace.
 # `debug = true` compiles the debug logs in (RUSTFLAGS --cfg appliance_debug) and lifts the
 # default log filter to debug; without it they are not in the binaries at all.
-{ lib, rustPlatform, debug ? false }:
+{ lib, rustPlatform, mpv-unwrapped, debug ? false }:
 
 rustPlatform.buildRustPackage {
   pname = "media-appliance";
-  version = "0.3.0";
+version = "0.3.1";
 
   src = lib.fileset.toSource {
     root = ./.;
@@ -17,6 +17,10 @@ rustPlatform.buildRustPackage {
   };
 
   cargoLock.lockFile = ./Cargo.lock;
+
+  # The player links libmpv in-process (the `mpv` crate #[link]s libmpv.so, which ships
+  # in mpv-unwrapped's .out output).
+  buildInputs = [ mpv-unwrapped ];
 
   preBuild = lib.optionalString debug ''
     export RUSTFLAGS="$RUSTFLAGS --cfg appliance_debug"
