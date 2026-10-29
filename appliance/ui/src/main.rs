@@ -644,6 +644,14 @@ fn main() -> Result<(), slint::PlatformError> {
     let cache = PathBuf::from(env_or("UI_CACHE", "/tmp/appliance-ui/art"));
     let inproc = matches!(env_or("UI_HANDOFF", "exit").as_str(), "inproc" | "child");
     let play = env_or("UI_PLAY", "play");
+    // In child mode (cage) no supervisor loop clears the saved page and focus (session.sh does it in
+    // exit mode), and the UI process lives across playbacks, so any start of it is a fresh start:
+    // open on the home screen instead of a page saved before the last reboot.
+    if env_or("UI_HANDOFF", "exit") == "child" {
+        for f in ["focus", "detail"] {
+            let _ = std::fs::remove_file(state_dir().join(f));
+        }
+    }
 
     let ui = App::new()?;
     ui.set_version(env!("CARGO_PKG_VERSION").into());

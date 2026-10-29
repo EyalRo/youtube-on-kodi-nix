@@ -57,6 +57,8 @@ pkgs.testers.runNixOSTest {
     machine.succeed(f"curl -sf -XPOST {API}/rescan")
 
     with subtest("cage starts and the UI draws as a Wayland client"):
+        # A page and focus saved before a reboot must not survive a fresh start in cage mode.
+        machine.succeed("mkdir -p /tmp/appliance-ui && echo '2 1' > /tmp/appliance-ui/focus && echo 'c-stale 0 0' > /tmp/appliance-ui/detail")
         machine.succeed(
             "systemd-run --unit=ui --collect"
             " -E HOME=/root -E XDG_RUNTIME_DIR=/run/user-ui -E LIBSEAT_BACKEND=builtin"
@@ -69,6 +71,8 @@ pkgs.testers.runNixOSTest {
             " sh -c 'mkdir -p /run/user-ui && chmod 700 /run/user-ui && exec cage -s -- appliance-ui'"
         )
         machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'rows loaded'", timeout=90)
+        machine.succeed("test ! -e /tmp/appliance-ui/detail && test ! -e /tmp/appliance-ui/focus")
+        assert "page opened" not in ui_log(), ui_log()
         machine.sleep(5)
         machine.screenshot("cage-1-ui")
         assert os.path.getsize(os.path.join(machine.out_dir, "cage-1-ui.png")) > 20000
