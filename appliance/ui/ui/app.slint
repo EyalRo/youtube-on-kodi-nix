@@ -25,6 +25,48 @@ export struct RowData {
     tiles: [TileData],
 }
 
+export struct BtDevice {
+    name: string,
+    /// "Connected", "Paired" or "Available".
+    status: string,
+    /// 0 other device, 1 game controller, 2 8BitDo M30, 3 8BitDo Lite 2.
+    kind: int,
+    /// 0 available, 1 paired, 2 connected.
+    state: int,
+}
+
+/// A drawing of one of the controllers we give pairing instructions for: model 2 is the black
+/// 8BitDo M30 (six face buttons), model 3 the teal 8BitDo Lite 2 (four face buttons).
+component ControllerArt inherits Rectangle {
+    in property <int> model;
+    property <color> body: model == 2 ? #1b1b1f : #2fa59a;
+    property <color> edge: model == 2 ? #55555d : #5fd1c6;
+    property <color> key: model == 2 ? #55555d : #17504b;
+    width: 150px;
+    height: 86px;
+    border-radius: model == 2 ? 14px : 40px;
+    background: body;
+    border-width: 2px;
+    border-color: edge;
+    // The d-pad.
+    Rectangle { x: 20px; y: 36px; width: 36px; height: 12px; background: key; border-radius: 3px; }
+    Rectangle { x: 32px; y: 24px; width: 12px; height: 36px; background: key; border-radius: 3px; }
+    if model == 2: Rectangle {
+        // Six buttons in two rows of three.
+        for i in 3: Rectangle { x: 88px + i * 20px; y: 24px; width: 14px; height: 14px; border-radius: 7px; background: #9a9aa4; }
+        for i in 3: Rectangle { x: 88px + i * 20px; y: 46px; width: 14px; height: 14px; border-radius: 7px; background: #9a9aa4; }
+    }
+    if model == 3: Rectangle {
+        // Four buttons in a diamond, two small ones in the middle.
+        Rectangle { x: 108px; y: 20px; width: 14px; height: 14px; border-radius: 7px; background: #e8f7f5; }
+        Rectangle { x: 108px; y: 52px; width: 14px; height: 14px; border-radius: 7px; background: #e8f7f5; }
+        Rectangle { x: 92px; y: 36px; width: 14px; height: 14px; border-radius: 7px; background: #e8f7f5; }
+        Rectangle { x: 124px; y: 36px; width: 14px; height: 14px; border-radius: 7px; background: #e8f7f5; }
+        Rectangle { x: 66px; y: 60px; width: 8px; height: 8px; border-radius: 4px; background: key; }
+        Rectangle { x: 80px; y: 60px; width: 8px; height: 8px; border-radius: 4px; background: key; }
+    }
+}
+
 component Poster inherits Rectangle {
     in property <TileData> data;
     in property <bool> focused;
@@ -141,6 +183,29 @@ export component App inherits Window {
     // The newer version waiting to be installed; empty when the appliance is up to date.
     in property <string> available: "";
     in-out property <bool> settings-open: false;
+    // Settings pages: 0 the main page, 1 the Bluetooth controllers page.
+    in-out property <int> settings-page: 0;
+    // The Controllers page. Selection 0 is the scan row; devices follow. `bt-actions` shows the
+    // action list of the selected device; `bt-busy` ignores keys while BlueZ is pairing.
+    in property <[BtDevice]> bt-devices;
+    in property <bool> bt-available: true;
+    in property <bool> bt-scanning: false;
+    in-out property <bool> bt-busy: false;
+    in-out property <string> bt-message: "";
+    in-out property <int> bt-sel: 0;
+    in-out property <bool> bt-actions: false;
+    in-out property <int> bt-act-sel: 0;
+    in property <string> bt-hint-m30: "";
+    in property <string> bt-hint-lite2: "";
+    in property <string> bt-again-m30: "";
+    in property <string> bt-again-lite2: "";
+    callback bt-open();
+    callback bt-close();
+    callback bt-scan();
+    callback bt-pair(int);
+    callback bt-connect(int);
+    callback bt-disconnect(int);
+    callback bt-forget(int);
     // Debug builds log every remote button the UI receives (the text of the key event).
     callback key-debug(string);
     // sel-row == -1 puts the focus on the top bar; bar-sel picks the button (0 sync, 1 settings,
@@ -172,7 +237,12 @@ export component App inherits Window {
     // returns to the page below it. On the show list there is nowhere further up.
     public function go-back() {
         disarm-power("button");
-        if (settings-open) { settings-open = false; return; }
+        if (settings-open) {
+            if (bt-actions) { bt-actions = false; }
+            else if (settings-page == 1) { leave-controllers(); }
+            else { settings-open = false; }
+            return;
+        }
         if (menu-open) { menu-close(); return; }
         if (detail) {
             if (detail-focus == 1) { detail-focus = 0; moved(); }
@@ -186,12 +256,72 @@ export component App inherits Window {
     // Home goes to the top of the tree: out of any show page, onto the first row.
     public function go-home() {
         disarm-power("button");
-        if (settings-open) { settings-open = false; return; }
+        if (settings-open) {
+            if (settings-page == 1) { leave-controllers(); }
+            settings-open = false;
+            return;
+        }
         if (menu-open) { menu-close(); return; }
         if (detail) { back(); }
         sel-row = rows.length > 0 ? 0 : -1;
         sel-col = 0;
         moved();
+    }
+
+    // Number of entries in the action list of the selected controller.
+    function act-count() -> int {
+        return bt-sel >= 1 && bt-sel <= bt-devices.length && bt-devices[bt-sel - 1].state == 0 ? 1 : 2;
+    }
+
+    function act-label(i: int) -> string {
+        if (bt-sel < 1 || bt-sel > bt-devices.length) { return ""; }
+        if (bt-devices[bt-sel - 1].state == 0) { return "Pair and connect"; }
+        if (i == 1) { return "Forget"; }
+        return bt-devices[bt-sel - 1].state == 1 ? "Connect" : "Disconnect";
+    }
+
+    function leave-controllers() {
+        settings-page = 0;
+        bt-actions = false;
+        bt-close();
+    }
+
+    function bt-run-action() {
+        bt-actions = false;
+        if (bt-sel < 1 || bt-sel > bt-devices.length) { return; }
+        bt-busy = true;
+        bt-message = "Working…";
+        if (bt-devices[bt-sel - 1].state == 0) { bt-pair(bt-sel - 1); }
+        else if (bt-act-sel == 1) { bt-forget(bt-sel - 1); }
+        else if (bt-devices[bt-sel - 1].state == 1) { bt-connect(bt-sel - 1); }
+        else { bt-disconnect(bt-sel - 1); }
+    }
+
+    // Keys while the settings are open. The main page opens Controllers with select and closes on
+    // any other button; the Controllers page moves with up/down, selects with Return, and goes back
+    // a level with Back/Escape.
+    function settings-key(text: string) {
+        if (settings-page == 0) {
+            if (text == Key.Return) { settings-page = 1; bt-sel = 0; bt-actions = false; bt-message = ""; bt-open(); }
+            else { settings-open = false; }
+            return;
+        }
+        if (text == Key.Home) { leave-controllers(); settings-open = false; return; }
+        if (bt-busy) { return; }
+        if (bt-actions) {
+            if (text == Key.UpArrow) { if (bt-act-sel > 0) { bt-act-sel -= 1; moved(); } }
+            else if (text == Key.DownArrow) { if (bt-act-sel < act-count() - 1) { bt-act-sel += 1; moved(); } }
+            else if (text == Key.Return) { bt-run-action(); }
+            else { bt-actions = false; }
+            return;
+        }
+        if (text == Key.UpArrow) { if (bt-sel > 0) { bt-sel -= 1; moved(); } }
+        else if (text == Key.DownArrow) { if (bt-sel < bt-devices.length) { bt-sel += 1; moved(); } }
+        else if (text == Key.Return) {
+            if (bt-sel == 0) { bt-scan(); }
+            else if (bt-available && bt-sel <= bt-devices.length) { bt-actions = true; bt-act-sel = 0; }
+        }
+        else if (text == Key.Escape || text == Key.Backspace) { leave-controllers(); }
     }
 
     function disarm-power(why: string) {
@@ -210,6 +340,7 @@ export component App inherits Window {
             notice-timer.running = true;
         } else if (bar-sel == 1) {
             settings-open = true;
+            settings-page = 0;
             config();
         } else if (armed == bar-sel) {
             armed = -1;
@@ -225,7 +356,7 @@ export component App inherits Window {
         key-pressed(e) => {
             key-debug(e.text);
             if (loading) { return accept; }
-            if (settings-open) { settings-open = false; return accept; }
+            if (settings-open) { settings-key(e.text); return accept; }
             // Reboot and shutdown need a second select; any other button cancels.
             if (e.text != Key.Return && armed >= 0) { disarm-power("button"); }
             if (menu-open) {
@@ -573,18 +704,18 @@ export component App inherits Window {
     }
     }
 
-    // Settings: a modal page, any button closes it.
+    // Settings: the main page (version, upgrade, Controllers) and the Bluetooth controllers page.
     if settings-open: Rectangle {
         x: 0;
         y: 0;
         width: root.width;
         height: root.height;
         background: #00000080;
-        Rectangle {
+        if settings-page == 0: Rectangle {
             x: (root.width - 560px) / 2;
-            y: (root.height - 280px) / 2;
+            y: (root.height - 340px) / 2;
             width: 560px;
-            height: 280px;
+            height: 340px;
             border-radius: 20px;
             background: #16202a;
             border-width: 2px;
@@ -600,7 +731,7 @@ export component App inherits Window {
             }
             Text {
                 x: 32px;
-                y: 92px;
+                y: 84px;
                 width: 496px;
                 text: "Installed version " + version;
                 font-size: 26px;
@@ -608,20 +739,210 @@ export component App inherits Window {
             }
             Text {
                 x: 32px;
-                y: 140px;
+                y: 128px;
                 width: 496px;
                 text: available != "" ? "Upgrade available: " + available : "Up to date";
                 font-size: 26px;
                 color: available != "" ? #e50914 : #7d8892;
             }
+            Rectangle {
+                x: 32px;
+                y: 200px;
+                width: 496px;
+                height: 56px;
+                border-radius: 10px;
+                background: #243442;
+                border-width: 2px;
+                border-color: #ffd54a;
+                Text {
+                    x: 20px;
+                    text: "Controllers";
+                    font-size: 26px;
+                    color: white;
+                    vertical-alignment: center;
+                }
+                Text {
+                    x: 440px;
+                    width: 36px;
+                    text: "›";
+                    font-size: 30px;
+                    color: #ffd54a;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
             Text {
                 x: 32px;
-                y: 236px;
+                y: 288px;
                 width: 496px;
-                text: "any button to close";
+                text: "select: controllers · any other button closes";
                 font-size: 18px;
                 color: #7d8892;
                 horizontal-alignment: center;
+            }
+        }
+        if settings-page == 1: Rectangle {
+            property <int> top: max(0, bt-sel - 7);
+            x: (root.width - 1500px) / 2;
+            y: (root.height - 860px) / 2;
+            width: 1500px;
+            height: 860px;
+            border-radius: 20px;
+            background: #16202a;
+            border-width: 2px;
+            border-color: #2a3844;
+            Text {
+                x: 40px;
+                y: 28px;
+                width: 800px;
+                text: "Controllers";
+                font-size: 30px;
+                font-weight: 600;
+                color: white;
+            }
+            if !bt-available: Text {
+                x: 40px;
+                y: 120px;
+                width: 820px;
+                text: bt-message;
+                font-size: 26px;
+                color: #e50914;
+                wrap: word-wrap;
+            }
+            if bt-available: Rectangle {
+                // Row 0: the scan action.
+                if top == 0: Rectangle {
+                    x: 40px;
+                    y: 100px;
+                    width: 820px;
+                    height: 56px;
+                    border-radius: 10px;
+                    background: bt-sel == 0 ? #243442 : #1b2733;
+                    border-width: 2px;
+                    border-color: bt-sel == 0 ? #ffd54a : #2a3844;
+                    Text {
+                        x: 20px;
+                        text: bt-scanning ? "Scanning… select to stop" : "Scan for controllers";
+                        font-size: 26px;
+                        color: bt-scanning ? #4cd964 : white;
+                        vertical-alignment: center;
+                    }
+                }
+                for d[i] in bt-devices: Rectangle {
+                    visible: i + 1 >= top && i + 1 < top + 8;
+                    x: 40px;
+                    y: 100px + (i + 1 - top) * 64px;
+                    width: 820px;
+                    height: 56px;
+                    border-radius: 10px;
+                    background: bt-sel == i + 1 ? #243442 : #1b2733;
+                    border-width: 2px;
+                    border-color: bt-sel == i + 1 ? #ffd54a : #2a3844;
+                    Text {
+                        x: 20px;
+                        width: 560px;
+                        text: d.name;
+                        font-size: 26px;
+                        color: d.kind == 0 ? #7d8892 : white;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        x: 600px;
+                        width: 200px;
+                        text: d.status;
+                        font-size: 24px;
+                        color: d.state == 2 ? #4cd964 : d.state == 1 ? #ffd54a : #9aa7b2;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                    }
+                }
+                if bt-devices.length == 0: Text {
+                    x: 40px;
+                    y: 180px;
+                    width: 820px;
+                    text: "No controllers yet. Select Scan, then put a controller into pairing mode (see the right).";
+                    font-size: 22px;
+                    color: #7d8892;
+                    wrap: word-wrap;
+                }
+                // The action list of the selected device.
+                if bt-actions: Rectangle {
+                    x: 380px;
+                    y: 100px + (bt-sel - top) * 64px + 44px;
+                    width: 440px;
+                    height: act-count() * 60px + 16px;
+                    border-radius: 12px;
+                    background: #0e1318;
+                    border-width: 2px;
+                    border-color: #ffd54a;
+                    for i in act-count(): Rectangle {
+                        x: 8px;
+                        y: 8px + i * 60px;
+                        width: 424px;
+                        height: 52px;
+                        border-radius: 8px;
+                        background: bt-act-sel == i ? #243442 : transparent;
+                        Text {
+                            x: 16px;
+                            text: act-label(i);
+                            font-size: 24px;
+                            color: act-label(i) == "Forget" ? #e50914 : white;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+            // How to put each known controller into pairing mode.
+            Text {
+                x: 900px;
+                y: 28px;
+                width: 568px;
+                text: "Pairing mode";
+                font-size: 26px;
+                font-weight: 600;
+                color: white;
+            }
+            Rectangle {
+                x: 900px;
+                y: 100px;
+                width: 568px;
+                height: 300px;
+                border-radius: 14px;
+                background: #1c2833;
+                ControllerArt { x: 20px; y: 20px; model: 2; }
+                Text { x: 190px; y: 36px; width: 360px; text: "8BitDo M30 (black)"; font-size: 24px; font-weight: 600; color: white; }
+                Text { x: 20px; y: 130px; width: 528px; text: bt-hint-m30; font-size: 21px; color: #c8d1d9; wrap: word-wrap; }
+                Text { x: 20px; y: 240px; width: 528px; text: bt-again-m30; font-size: 19px; color: #7d8892; wrap: word-wrap; }
+            }
+            Rectangle {
+                x: 900px;
+                y: 424px;
+                width: 568px;
+                height: 300px;
+                border-radius: 14px;
+                background: #1c2833;
+                ControllerArt { x: 20px; y: 20px; model: 3; }
+                Text { x: 190px; y: 36px; width: 360px; text: "8BitDo Lite 2 (teal)"; font-size: 24px; font-weight: 600; color: white; }
+                Text { x: 20px; y: 130px; width: 528px; text: bt-hint-lite2; font-size: 21px; color: #c8d1d9; wrap: word-wrap; }
+                Text { x: 20px; y: 240px; width: 528px; text: bt-again-lite2; font-size: 19px; color: #7d8892; wrap: word-wrap; }
+            }
+            Text {
+                x: 40px;
+                y: 760px;
+                width: 1420px;
+                text: bt-message;
+                font-size: 24px;
+                color: #ffd54a;
+                overflow: elide;
+            }
+            Text {
+                x: 40px;
+                y: 810px;
+                width: 1420px;
+                text: bt-busy ? "Please wait…" : "select: choose · back: previous page";
+                font-size: 18px;
+                color: #7d8892;
             }
         }
     }

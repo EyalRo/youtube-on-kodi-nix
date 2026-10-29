@@ -15,9 +15,7 @@ use serde_json::Value;
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 
 // Bluetooth controller setup (logic is unit-tested without D-Bus).
-#[allow(dead_code)]
 mod bt;
-#[allow(dead_code)]
 mod bluez;
 
 slint::include_modules!();
@@ -567,6 +565,90 @@ fn tick_player() -> Option<impl FnMut()> {
     })
 }
 
+/// Put a Bluetooth snapshot on the Controllers page. Runs on the UI thread.
+fn apply_bt(ui: &App, paths: &std::sync::Mutex<Vec<String>>, snap: &bt::Snapshot) {
+    let rows: Vec<BtDevice> = snap
+        .views
+        .iter()
+        .map(|v| BtDevice {
+            name: v.name.clone().into(),
+            status: match v.state {
+                bt::State::Connected => "Connected",
+                bt::State::Paired => "Paired",
+                bt::State::Available => "Available",
+            }
+            .into(),
+            kind: match v.kind {
+                bt::Kind::Other => 0,
+                bt::Kind::Controller(None) => 1,
+                bt::Kind::Controller(Some(bt::Model::M30)) => 2,
+                bt::Kind::Controller(Some(bt::Model::Lite2)) => 3,
+            },
+            state: match v.state {
+                bt::State::Available => 0,
+                bt::State::Paired => 1,
+                bt::State::Connected => 2,
+            },
+        })
+        .collect();
+    let n = rows.len() as i32;
+    *paths.lock().unwrap() = snap.views.iter().map(|v| v.path.clone()).collect();
+    ui.set_bt_devices(ModelRc::new(VecModel::from(rows)));
+    ui.set_bt_available(snap.available);
+    ui.set_bt_scanning(snap.scanning);
+    ui.set_bt_busy(false);
+    ui.set_bt_message(snap.message.as_str().into());
+    if ui.get_bt_sel() > n {
+        ui.set_bt_sel(n);
+    }
+}
+
+/// The Bluetooth worker: owns the BlueZ session, serves the Controllers page's commands, and while
+/// the page is open refreshes it about once a second. BlueZ calls (pairing takes seconds) must not
+/// block the UI thread, so they all happen here and the results come back as snapshots.
+fn bt_worker(ui: slint::Weak<App>, paths: std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> std::sync::mpsc::Sender<bt::Command> {
+    use std::sync::mpsc::RecvTimeoutError;
+    let (tx, rx) = std::sync::mpsc::channel::<bt::Command>();
+    let spawned = std::thread::Builder::new().name("bluetooth".into()).spawn(move || {
+        let mut session: Option<bt::Session<bluez::Bluez>> = None;
+        let mut open = false;
+        loop {
+            let cmd = match rx.recv_timeout(Duration::from_secs(1)) {
+                Ok(c) => c,
+                Err(RecvTimeoutError::Timeout) if open => bt::Command::Poll,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => return,
+            };
+            match cmd {
+                bt::Command::Open => open = true,
+                bt::Command::Close => open = false,
+                _ => {}
+            }
+            if session.is_none() {
+                match bluez::Bluez::connect() {
+                    Ok(b) => session = Some(bt::Session::new(b)),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "cannot reach the system D-Bus for Bluetooth");
+                        let snap = bt::Snapshot { message: format!("Bluetooth is not available ({e})"), ..Default::default() };
+                        let paths = paths.clone();
+                        let _ = ui.upgrade_in_event_loop(move |ui| apply_bt(&ui, &paths, &snap));
+                        continue;
+                    }
+                }
+            }
+            if let Some(s) = session.as_mut() {
+                let snap = s.handle(cmd);
+                let paths = paths.clone();
+                let _ = ui.upgrade_in_event_loop(move |ui| apply_bt(&ui, &paths, &snap));
+            }
+        }
+    });
+    if let Err(e) = spawned {
+        tracing::error!(error = %e, "cannot start the Bluetooth worker");
+    }
+    tx
+}
+
 /// Back and home on the remote. The key mapping delivers them as an empty key (text "\0"), the
 /// same for every button it does not know, so read the kernel's input events as the player does.
 /// Codes: KEY_BACK 158, KEY_HOMEPAGE 172.
@@ -739,6 +821,59 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.on_moved(move || tick());
     }
     ui.on_config(|| tracing::info!(version = env!("CARGO_PKG_VERSION"), "settings opened"));
+    // Bluetooth controllers (Settings -> Controllers). Pairing hints come from 8BitDo's manuals.
+    ui.set_bt_hint_m30(bt::hint(bt::Model::M30).into());
+    ui.set_bt_hint_lite2(bt::hint(bt::Model::Lite2).into());
+    ui.set_bt_again_m30(format!("To reconnect later: {}", bt::reconnect_hint(bt::Model::M30)).into());
+    ui.set_bt_again_lite2(format!("To reconnect later: {}", bt::reconnect_hint(bt::Model::Lite2)).into());
+    let bt_paths = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let bt_tx = bt_worker(ui.as_weak(), bt_paths.clone());
+    {
+        let tx = bt_tx.clone();
+        ui.on_bt_open(move || {
+            tracing::info!("controllers page opened");
+            let _ = tx.send(bt::Command::Open);
+        });
+        let tx = bt_tx.clone();
+        ui.on_bt_close(move || {
+            tracing::info!("controllers page closed");
+            let _ = tx.send(bt::Command::Close);
+        });
+        let tx = bt_tx.clone();
+        ui.on_bt_scan(move || {
+            let _ = tx.send(bt::Command::ToggleScan);
+        });
+        // The action callbacks get the index into the list on screen; the paths are in the same order.
+        let pick = move |paths: &std::sync::Mutex<Vec<String>>, i: i32| paths.lock().unwrap().get(i as usize).cloned();
+        let (tx, paths) = (bt_tx.clone(), bt_paths.clone());
+        ui.on_bt_pair(move |i| {
+            if let Some(p) = pick(&paths, i) {
+                tracing::info!(path = %p, "pair requested");
+                let _ = tx.send(bt::Command::Pair(p));
+            }
+        });
+        let (tx, paths) = (bt_tx.clone(), bt_paths.clone());
+        ui.on_bt_connect(move |i| {
+            if let Some(p) = pick(&paths, i) {
+                tracing::info!(path = %p, "connect requested");
+                let _ = tx.send(bt::Command::Connect(p));
+            }
+        });
+        let (tx, paths) = (bt_tx.clone(), bt_paths.clone());
+        ui.on_bt_disconnect(move |i| {
+            if let Some(p) = pick(&paths, i) {
+                tracing::info!(path = %p, "disconnect requested");
+                let _ = tx.send(bt::Command::Disconnect(p));
+            }
+        });
+        let (tx, paths) = (bt_tx.clone(), bt_paths.clone());
+        ui.on_bt_forget(move |i| {
+            if let Some(p) = pick(&paths, i) {
+                tracing::info!(path = %p, "forget requested");
+                let _ = tx.send(bt::Command::Forget(p));
+            }
+        });
+    }
     // Look for new videos now instead of at the next timer run. `--no-block` queues the oneshot and
     // returns; a run already in progress absorbs the request.
     ui.on_sync(|| {

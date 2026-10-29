@@ -139,13 +139,6 @@ pub fn reconnect_hint(model: Model) -> &'static str {
     }
 }
 
-pub fn model_title(model: Model) -> &'static str {
-    match model {
-        Model::M30 => "8BitDo M30 (black)",
-        Model::Lite2 => "8BitDo Lite 2 (teal)",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
