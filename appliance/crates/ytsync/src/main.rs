@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use tracing_subscriber::EnvFilter;
 use ytsync::{Config, YtDlp, channels, notify_rescan, run};
 
 fn env_or(name: &str, default: &str) -> String {
@@ -81,15 +80,7 @@ fn manage(list: &std::path::Path, args: &[String]) -> Option<ExitCode> {
 }
 
 fn main() -> ExitCode {
-    let filter = EnvFilter::try_from_env("YTSYNC_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
-    if env_or("YTSYNC_LOG_FORMAT", "json") == "json" {
-        tracing_subscriber::fmt()
-            .json()
-            .with_env_filter(filter)
-            .init();
-    } else {
-        tracing_subscriber::fmt().with_env_filter(filter).init();
-    }
+    applog::init("ytsync", "YTSYNC_LOG");
     let cfg = match config() {
         Ok(c) => c,
         Err(e) => {
@@ -147,9 +138,11 @@ fn main() -> ExitCode {
     {
         tracing::warn!(error = %e, "could not ask mediad to rescan; it will pick the videos up on its next timed scan");
     }
-    if summary.failed_channels > 0 {
+    let code = if summary.failed_channels > 0 {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
-    }
+    };
+    applog::flush();
+    code
 }

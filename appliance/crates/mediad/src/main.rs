@@ -4,7 +4,6 @@ use std::time::Duration;
 use mediad::{AppState, router};
 use scanner::ReleaseDb;
 use store::Store;
-use tracing_subscriber::EnvFilter;
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
@@ -12,16 +11,7 @@ fn env_or(name: &str, default: &str) -> String {
 
 #[tokio::main]
 async fn main() {
-    let filter = EnvFilter::try_from_env("MEDIAD_LOG").unwrap_or_else(|_| EnvFilter::new(applog::default_filter()));
-    if env_or("MEDIAD_LOG_FORMAT", "json") == "json" {
-        tracing_subscriber::fmt()
-            .json()
-            .with_env_filter(filter)
-            .init();
-    } else {
-        tracing_subscriber::fmt().with_env_filter(filter).init();
-    }
-
+    applog::init("mediad", "MEDIAD_LOG");
     let media_root = PathBuf::from(env_or("MEDIAD_MEDIA_ROOT", "/media"));
     let db_path = PathBuf::from(env_or("MEDIAD_DB", "/persist/mediad/mediad.sqlite"));
     let bind = env_or("MEDIAD_BIND", "127.0.0.1:8730");

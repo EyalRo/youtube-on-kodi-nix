@@ -7,6 +7,9 @@ let
   inherit (lib) mkEnableOption mkOption mkIf types;
   ytsyncEnabled = cfg.ytsync.enable;
   debugBuild = cfg.package.debug or false;
+  # `VLOGS` is read by applog (the shared logging library) to push structured JSON to
+  # VictoriaLogs; unset disables the push and leaves the journal as the only sink.
+  vlogsEnv = lib.optionalAttrs (cfg.victorialogs != null) { VLOGS = cfg.victorialogs; };
 in
 {
   options.services.media-appliance = {
@@ -50,6 +53,13 @@ in
       type = types.ints.unsigned;
       default = 900;
       description = "How often to rescan the library; 0 only scans on request.";
+    };
+
+    victorialogs = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "192.168.0.39:9428";
+      description = "VictoriaLogs host:port. When set, mediad, ytsync and artsync push their logs there as structured JSON (service/host/level/fields queryable).";
     };
 
     releaseDbDir = mkOption {
@@ -183,7 +193,8 @@ in
         MEDIAD_RESCAN_SECS = toString cfg.rescanSeconds;
         MEDIAD_LOG = cfg.logLevel;
         MEDIAD_ART_CACHE = "${cfg.stateDir}/art";
-      } // lib.optionalAttrs (cfg.releaseDbDir != null) {
+      } // vlogsEnv
+      // lib.optionalAttrs (cfg.releaseDbDir != null) {
         MEDIAD_RELEASE_DB = toString cfg.releaseDbDir;
       };
       serviceConfig = {
@@ -232,7 +243,7 @@ in
         YTSYNC_LOG = cfg.logLevel;
         # yt-dlp keeps its cache here.
         XDG_CACHE_HOME = "${cfg.ytsync.stateDir}/cache";
-      };
+      } // vlogsEnv;
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${cfg.package}/bin/ytsync";
@@ -259,7 +270,8 @@ in
         ARTSYNC_MAX_LOOKUPS = toString cfg.artsync.maxLookups;
         ARTSYNC_LOG = cfg.logLevel;
         SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
-      } // lib.optionalAttrs (cfg.artsync.tmdbKeyFile != null) {
+      } // vlogsEnv
+      // lib.optionalAttrs (cfg.artsync.tmdbKeyFile != null) {
         ARTSYNC_TMDB_KEY_FILE = cfg.artsync.tmdbKeyFile;
       };
       serviceConfig = {

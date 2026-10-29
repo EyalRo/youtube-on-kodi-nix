@@ -156,7 +156,9 @@ in
       } // lib.optionalAttrs (cfg.mpvExtraArgs != "") {
         PLAYER_MPV_ARGS = cfg.mpvExtraArgs;
       } // lib.optionalAttrs (cfg.victorialogs != null) {
-        UI_VLOGS = cfg.victorialogs;
+        # Shared logging library reads VLOGS; covers the UI's own logs and, through the session,
+        # the `play` player it launches.
+        VLOGS = cfg.victorialogs;
       };
       serviceConfig = {
         # Plymouth lets go of the display (keeping its last frame up) just before the UI takes it.

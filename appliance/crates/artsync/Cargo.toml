@@ -10,7 +10,7 @@ rust-version.workspace = true
 catalog = { path = "../catalog" }
 serde_json.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
+applog = { path = "../applog" }
 
 [dev-dependencies]
 tempfile.workspace = true

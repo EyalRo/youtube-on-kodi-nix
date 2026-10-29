@@ -8,16 +8,24 @@ rustPlatform.buildRustPackage {
   version = "0.3.1";
 
   src = lib.fileset.toSource {
-    root = ./.;
+    root = ../.;
     fileset = lib.fileset.unions [
+      # The UI's own workspace...
       ./Cargo.toml
       ./Cargo.lock
       ./build.rs
       ./src
       ./ui
       ./session.sh
+      # ...and the applog crate it depends on (a path dependency, so its source must be present
+      # for the build; applog lives one level up and is self-contained).
+      ../crates/applog
     ];
   };
+
+  # cargo builds in the ui/ subdir of the combined source; the UI is its own workspace.
+  cargoRoot = "ui";
+  buildAndTestSubdir = "ui";
 
   cargoLock.lockFile = ./Cargo.lock;
 
@@ -37,7 +45,8 @@ rustPlatform.buildRustPackage {
       -depth 8 gray:$out/share/appliance-ui/logo-1400x300.gray
     magick -size 1400x300 xc:none -font ${dejavu_fonts}/share/fonts/truetype/DejaVuSans-Bold.ttf \
       -pointsize 190 -gravity center -fill "#e50914" -annotate +0+0 Shmetflix $out/share/appliance-ui/logo.png
-    install -Dm755 session.sh $out/bin/appliance-ui-session
+    # session.sh lives in the ui/ subdir of the combined source.
+    install -Dm755 ui/session.sh $out/bin/appliance-ui-session
     # The focus tick is played with aplay.
     wrapProgram $out/bin/appliance-ui --prefix PATH : ${lib.makeBinPath [ alsa-utils ]}
   '';

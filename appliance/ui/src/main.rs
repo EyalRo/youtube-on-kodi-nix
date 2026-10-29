@@ -16,17 +16,8 @@ use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 
 slint::include_modules!();
 
-/// Debug logging that exists only in debug builds (`RUSTFLAGS="--cfg appliance_debug"`); the
-/// back end's `applog` crate does the same, but this is a separate workspace.
-#[cfg(appliance_debug)]
-macro_rules! debug_log {
-    ($($t:tt)*) => { tracing::debug!($($t)*) };
-}
-#[cfg(not(appliance_debug))]
-macro_rules! debug_log {
-    ($($t:tt)*) => {};
-}
-const DEBUG_BUILD: bool = cfg!(appliance_debug);
+/// Debug logging that exists only in debug builds (`RUSTFLAGS="--cfg appliance_debug"`).
+const DEBUG_BUILD: bool = applog::DEBUG_BUILD;
 
 const MAX_TILES: usize = 40;
 /// Exit status that asks the supervisor to run `play` (id in `$UI_STATE/launch`).
@@ -154,7 +145,7 @@ fn load_detail(addr: &str, id: &str) -> Result<Detail, String> {
     #[cfg(appliance_debug)]
     let started = std::time::Instant::now();
     let v = get_json(addr, &format!("/items/{id}"))?;
-    debug_log!(%id, ms = started.elapsed().as_millis() as u64, "loaded a page");
+    applog::debug!(%id, ms = started.elapsed().as_millis() as u64, "loaded a page");
     let channel = v["item"]["kind"].as_str() == Some("channel");
     let mut seasons: Vec<(i64, Vec<Value>)> = Vec::new();
     for ep in v["episodes"].as_array().ok_or("no episodes")? {
@@ -247,7 +238,7 @@ fn open_detail(ui: &App, addr: &str, id: &str, season: usize, ep: usize, cache: 
     ui.set_sel_season(season as i32);
     set_season(ui, addr, &detail, season, cache);
     let eps = ui.get_episodes().row_count();
-    debug_log!(%id, season, ep, episodes = eps, "page contents set");
+    applog::debug!(%id, season, ep, episodes = eps, "page contents set");
     ui.set_sel_ep(ep.min(eps.saturating_sub(1)) as i32);
     ui.set_detail_focus(1.min(eps as i32));
     ui.set_detail(true);
@@ -483,48 +474,25 @@ fn restore_focus() -> (i32, i32) {
 }
 
 
-/// One-line JSON event to VictoriaLogs (`UI_VLOGS=host:port`; unset or empty disables it).
-/// Best effort with short timeouts: a missing log server must never hold up a power action.
-fn ship_event(event: &str, action: &str, detail: &str) {
-    use std::net::ToSocketAddrs;
-    let Ok(addr) = std::env::var("UI_VLOGS") else { return };
-    let Some(sock) = addr.to_socket_addrs().ok().and_then(|mut a| a.next()) else { return };
-    let host = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default();
-    let body = serde_json::json!({
-        "_msg": format!("power {event}: {action} {detail}").trim_end(),
-        "app": "appliance-ui",
-        "host": host.trim(),
-        "event": event,
-        "action": action,
-        "detail": detail,
-    })
-    .to_string();
-    let t = Duration::from_secs(2);
-    let sent = TcpStream::connect_timeout(&sock, t).and_then(|mut s| {
-        s.set_read_timeout(Some(t))?;
-        s.set_write_timeout(Some(t))?;
-        write!(
-            s,
-            "POST /insert/jsonline?_stream_fields=app,host&_msg_field=_msg HTTP/1.0\r\nHost: {addr}\r\nContent-Type: application/stream+json\r\nContent-Length: {}\r\n\r\n{body}\n",
-            body.len() + 1
-        )?;
-        let mut status = String::new();
-        s.read_to_string(&mut status)?; // wait for the reply so the event is in before we power off
-        Ok(status)
-    });
-    if let Err(e) = sent {
-        tracing::warn!(error = %e, "could not ship the event to VictoriaLogs");
-    }
-}
-
 /// A power event goes to the journal (tracing), the system console and VictoriaLogs.
+///
+/// The VictoriaLogs push is synchronous (`applog::sync_ship`): a power event must land before
+/// the box powers off. A missing log server never holds up the action (short timeouts, no retry).
 fn power_event(event: &str, action: &str, detail: &str) {
     tracing::info!(event, action, detail, "power");
     let line = format!("appliance-ui: power {event}: {action} {detail}\n");
     if let Ok(mut c) = std::fs::OpenOptions::new().append(true).open("/dev/console") {
         let _ = c.write_all(line.as_bytes());
     }
-    ship_event(event, action, detail);
+    applog::sync_ship(
+        "appliance-ui",
+        &format!("power {event}: {action} {detail}").trim_end(),
+        &[
+            ("event", serde_json::Value::from(event)),
+            ("action", serde_json::Value::from(action)),
+            ("detail", serde_json::Value::from(detail)),
+        ],
+    );
 }
 
 /// A 30 ms decaying 1.8 kHz blip as a 16-bit mono WAV, so there is no sound asset to ship.
@@ -613,7 +581,7 @@ fn watch_remote(ui: slint::Weak<App>) {
                 continue;
             }
         };
-        debug_log!(device = %path.display(), "watching an input device for the back and home buttons");
+        applog::debug!(device = %path.display(), "watching an input device for the back and home buttons");
         let ui = ui.clone();
         std::thread::spawn(move || {
             let mut ev = [0u8; 24];
@@ -626,7 +594,7 @@ fn watch_remote(ui: slint::Weak<App>) {
                 if kind != 1 || value != 1 {
                     continue; // button presses only
                 }
-                debug_log!(code, "input device button press");
+                applog::debug!(code, "input device button press");
                 let slot = match code {
                     KEY_BACK => 0,
                     KEY_HOMEPAGE => 1,
@@ -634,7 +602,7 @@ fn watch_remote(ui: slint::Weak<App>) {
                     _ => {
                         // Info, not debug: when a remote button does nothing, this names its code.
                         if !(code < 100 || [103, 105, 106, 108].contains(&code)) {
-                            debug_log!(code, "unmapped remote key");
+                            applog::debug!(code, "unmapped remote key");
                         }
                         continue;
                     }
@@ -659,13 +627,11 @@ fn watch_remote(ui: slint::Weak<App>) {
 }
 
 fn main() -> Result<(), slint::PlatformError> {
-    tracing_subscriber::fmt()
-        .json()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_env("UI_LOG")
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(if DEBUG_BUILD { "info,appliance_ui=debug" } else { "info" })),
-        )
-        .init();
+    applog::init_with_default(
+        "appliance-ui",
+        "UI_LOG",
+        if DEBUG_BUILD { "info,appliance_ui=debug" } else { "info" },
+    );
     tracing::info!(debug_build = DEBUG_BUILD, "appliance-ui starting");
     let mediad = env_or("UI_MEDIAD", "127.0.0.1:8730");
     let cache = PathBuf::from(env_or("UI_CACHE", "/tmp/appliance-ui/art"));
@@ -766,7 +732,7 @@ fn main() -> Result<(), slint::PlatformError> {
     #[cfg(appliance_debug)]
     ui.on_key_debug(|text| {
         let codes: Vec<u32> = text.chars().map(u32::from).collect();
-        debug_log!(?codes, "remote button reached the UI");
+        applog::debug!(?codes, "remote button reached the UI");
     });
     ui.on_arm(|action| power_event("armed", action.as_str(), "press select again within 3 s to confirm"));
     ui.on_disarm(|action, why| power_event("cancelled", action.as_str(), why.as_str()));
@@ -803,7 +769,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let (weak, page) = (ui.as_weak(), page.clone());
         ui.on_back(move || {
             let Some(ui) = weak.upgrade() else { return };
-            debug_log!("back to the home screen");
+            applog::debug!("back to the home screen");
             let _ = std::fs::remove_file(state_dir().join("detail"));
             *page.borrow_mut() = None;
             ui.set_detail(false);
@@ -871,7 +837,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // of a show/channel; None means the whole thing (tile or episode).
                 let target = menu_target(&ui);
                 let Some((id, season, label)) = target else {
-                    debug_log!("menu pressed but nothing is menuable here");
+                    applog::debug!("menu pressed but nothing is menuable here");
                     return;
                 };
                 let season_q = season.map(|s| format!("&season={s}")).unwrap_or_default();

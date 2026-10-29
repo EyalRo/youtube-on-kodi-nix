@@ -3,7 +3,6 @@ use std::process::ExitCode;
 
 use kodiimport::{Mapping, import};
 use store::Store;
-use tracing_subscriber::EnvFilter;
 
 const USAGE: &str = "usage: kodi-import <MyVideos.db> [--map KODI_PREFIX=LOCAL_PREFIX]...\n\
     example: kodi-import MyVideos131.db --map nfs://192.168.0.100/volume1/media/=/media/\n\
@@ -11,12 +10,7 @@ const USAGE: &str = "usage: kodi-import <MyVideos.db> [--map KODI_PREFIX=LOCAL_P
     Run the scan (start mediad once) first: only files already in the library are matched.";
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .json()
-        .with_env_filter(
-            EnvFilter::try_from_env("KODI_IMPORT_LOG").unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+    applog::init("kodi-import", "KODI_IMPORT_LOG");
     let mut args = std::env::args().skip(1);
     let Some(kodi_db) = args.next().filter(|a| !a.starts_with("--")) else {
         eprintln!("{USAGE}");
@@ -50,10 +44,12 @@ fn main() -> ExitCode {
             for p in &report.unmatched_sample {
                 tracing::warn!(path = %p, "no matching file in the library (sample)");
             }
+            applog::flush();
             ExitCode::SUCCESS
         }
         Err(e) => {
             tracing::error!(error = %e, "import failed");
+            applog::flush();
             ExitCode::from(1)
         }
     }

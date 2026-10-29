@@ -43,6 +43,7 @@
     enable = true;
     package = appliance;
     rescanSeconds = 30;
+    victorialogs = "192.168.0.39:9428";
     # A first live test: a couple of videos from one channel, not the whole list.
     artsync = { enable = true; tmdbKeyFile = "/persist/artsync/tmdb.key"; };
     ytsync = { enable = true; seedChannels = ./channels.default.conf; maxChannels = 1; maxPerChannel = 1; maxHeight = 720; };
@@ -95,8 +96,8 @@
       # The NUC default is its HDMI port; the VM has one analog HDA card.
       PLAYER_AUDIO_DEVICE = "alsa/default";
       PLAYER_DRM_CONNECTOR = "Virtual-1";
-      # Power events (armed, requested, accepted) go to VictoriaLogs as well as the console.
-      UI_VLOGS = "192.168.0.39:9428";
+      # Power events and the player's logs go to VictoriaLogs as structured JSON.
+      VLOGS = "192.168.0.39:9428";
     };
     serviceConfig = {
       # ALSA starts muted.

@@ -1,13 +1,19 @@
 [package]
 name = "applog"
-description = "Debug logging that exists only in debug builds (RUSTFLAGS=\"--cfg appliance_debug\")"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-rust-version.workspace = true
+description = "Shared logging for the appliance: JSON to the journal, structured push to VictoriaLogs"
+version = "0.3.0"
+edition = "2024"
+license = "GPL-2.0-or-later"
+rust-version = "1.88"
+
+# Self-contained on purpose: applog is depended on by the appliance back-end workspace AND by the
+# separately-workspaced UI (`appliance/ui`), which pulls it in as a path dependency. Using explicit
+# versions (rather than `* = { workspace = true }` inheritance) keeps it buildable in both contexts.
 
 [dependencies]
-tracing.workspace = true
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(appliance_debug)'] }

@@ -15,7 +15,6 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 applog = { path = "../applog" }
-tracing-subscriber.workspace = true
 mpv = "0.2.3"
 
 [dev-dependencies]

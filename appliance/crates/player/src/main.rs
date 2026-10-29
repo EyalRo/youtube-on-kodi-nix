@@ -3,20 +3,13 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use player::{Config, play_item};
-use tracing_subscriber::EnvFilter;
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
 }
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .json()
-        .with_env_filter(
-            EnvFilter::try_from_env("PLAYER_LOG")
-                .unwrap_or_else(|_| EnvFilter::new(applog::default_filter())),
-        )
-        .init();
+    applog::init("play", "PLAYER_LOG");
     let Some(item) = std::env::args().nth(1) else {
         eprintln!("usage: play <item id>   (ids come from mediad: GET /rows/everything)");
         return ExitCode::from(2);
@@ -40,9 +33,13 @@ fn main() -> ExitCode {
     tracing::info!(item = %item, debug_build = applog::DEBUG_BUILD, "player starting");
     applog::debug!(config = ?cfg, "player config");
     match play_item(&cfg, &item) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => {
+            applog::flush();
+            ExitCode::SUCCESS
+        }
         Err(e) => {
             tracing::error!(error = %e, item = %item, "playback failed");
+            applog::flush();
             ExitCode::from(1)
         }
     }

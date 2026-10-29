@@ -16,7 +16,6 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 applog = { path = "../applog" }
-tracing-subscriber.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

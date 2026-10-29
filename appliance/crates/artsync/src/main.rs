@@ -2,19 +2,13 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use artsync::{wait_for_mediad, Config, list_items, notify_rescan, run};
-use tracing_subscriber::EnvFilter;
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
 }
 
 fn main() -> ExitCode {
-    let filter = EnvFilter::try_from_env("ARTSYNC_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
-    if env_or("ARTSYNC_LOG_FORMAT", "json") == "json" {
-        tracing_subscriber::fmt().json().with_env_filter(filter).init();
-    } else {
-        tracing_subscriber::fmt().with_env_filter(filter).init();
-    }
+    applog::init("artsync", "ARTSYNC_LOG");
     let tmdb_key = std::env::var("ARTSYNC_TMDB_KEY_FILE")
         .ok()
         .filter(|p| !p.is_empty())
@@ -66,5 +60,6 @@ fn main() -> ExitCode {
     {
         tracing::warn!(error = %e, "could not ask mediad to rescan; it will pick the artwork up on its next timed scan");
     }
+    applog::flush();
     ExitCode::SUCCESS
 }

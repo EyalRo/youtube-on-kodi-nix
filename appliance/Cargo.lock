@@ -24,18 +24,20 @@ dependencies = [
 name = "applog"
 version = "0.3.1"
 dependencies = [
+ "serde_json",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
 name = "artsync"
 version = "0.3.1"
 dependencies = [
+ "applog",
  "catalog",
  "serde_json",
  "tempfile",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -452,6 +454,7 @@ dependencies = [
 name = "kodiimport"
 version = "0.3.1"
 dependencies = [
+ "applog",
  "catalog",
  "chrono",
  "rusqlite",
@@ -460,7 +463,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -537,7 +539,6 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -705,7 +706,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -1397,13 +1397,13 @@ dependencies = [
 name = "ytsync"
 version = "0.3.1"
 dependencies = [
+ "applog",
  "catalog",
  "scanner",
  "serde_json",
  "tempfile",
  "thiserror",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
