@@ -136,6 +136,7 @@ dependencies = [
  "slint",
  "slint-build",
  "tracing",
+ "zbus",
 ]
 
 [[package]]

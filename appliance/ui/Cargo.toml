@@ -22,6 +22,7 @@ applog = { path = "../crates/applog" }
 slint = { version = "1.16", default-features = false, features = [
     "std", "compat-1-2", "backend-linuxkms", "backend-winit-wayland", "renderer-software", "image-default-formats",
 ] }
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
 
 [build-dependencies]
 slint-build = "1.16"

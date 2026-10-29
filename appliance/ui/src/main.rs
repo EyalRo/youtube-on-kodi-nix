@@ -17,6 +17,8 @@ use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 // Bluetooth controller setup (logic is unit-tested without D-Bus).
 #[allow(dead_code)]
 mod bt;
+#[allow(dead_code)]
+mod bluez;
 
 slint::include_modules!();
 
