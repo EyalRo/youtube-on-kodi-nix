@@ -144,7 +144,13 @@ const RETROARCH_OVERRIDES: &str =
 /// that would otherwise underrun the ALSA ring and chop the sound.
 pub fn retroarch_overrides(cfg: &Config) -> String {
     let device = cfg.audio_device.strip_prefix("alsa/").unwrap_or(&cfg.audio_device);
-    format!("{RETROARCH_OVERRIDES}audio_driver = \"alsa\"\naudio_device = \"{device}\"\naudio_enable = \"true\"\naudio_mute_enable = \"false\"\naudio_out_rate = \"48000\"\naudio_latency = \"128\"\naudio_sync = \"true\"\nvideo_vsync = \"true\"\n")
+    // Spike (cage): PLAYER_WAYLAND=1 runs RetroArch as a Wayland client (GL) instead of the DRM driver.
+    let base = if std::env::var_os("PLAYER_WAYLAND").is_some_and(|v| v == "1") {
+        RETROARCH_OVERRIDES.replace("video_driver = \"drm\"", "video_driver = \"gl\"\ninput_driver = \"udev\"")
+    } else {
+        RETROARCH_OVERRIDES.to_string()
+    };
+    format!("{base}audio_driver = \"alsa\"\naudio_device = \"{device}\"\naudio_enable = \"true\"\naudio_mute_enable = \"false\"\naudio_out_rate = \"48000\"\naudio_latency = \"128\"\naudio_sync = \"true\"\nvideo_vsync = \"true\"\n")
 }
 
 pub fn retroarch_args(cfg: &Config, play: &Play, overrides: &Path) -> Result<Vec<String>, PlayError> {
@@ -289,8 +295,12 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         tracing::error!(path = %overrides.display(), error = %e, "cannot write retroarch overrides");
         PlayError::Launch(format!("cannot write {}: {e}", overrides.display()))
     })?;
-    let args = retroarch_args(cfg, play, &overrides)?;
+    let mut args = retroarch_args(cfg, play, &overrides)?;
+    // Its own log (driver choice, buffer sizes, underruns) is not on stderr; followed live below.
+    // These flags must come before `--`, or RetroArch takes them for content paths.
     let log_file = std::env::temp_dir().join(format!("retroarch-{}.log", std::process::id()));
+    let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
+    args.splice(end..end, ["--verbose".to_string(), "--log-file".to_string(), log_file.display().to_string()]);
     http::post_json(
         &cfg.mediad,
         &format!("/items/{}/played", play.id),
@@ -303,8 +313,6 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         // the offscreen platform lets it initialise without a display (the game uses the drm driver).
         .env("QT_QPA_PLATFORM", "offscreen")
         .args(args)
-        // Its own log (driver choice, buffer sizes, underruns) is not on stderr; followed live below.
-        .args(["--verbose".as_ref(), "--log-file".as_ref(), log_file.as_os_str()])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

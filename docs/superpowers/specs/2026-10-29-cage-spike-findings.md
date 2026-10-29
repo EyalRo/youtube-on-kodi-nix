@@ -20,3 +20,15 @@ Test: `nix build .#checks.x86_64-linux.appliance-cage -L` (appliance/test-cage.n
 ## Not proven (needs the NUC)
 
 Transition timing and black frames at real scanout, RetroArch under cage (not yet tried in the VM either), game latency, VA-API, AC-3 passthrough, 4K and refresh matching.
+
+## Update: RetroArch under cage (VM, Mega Drive ROM, genesis_plus_gx)
+
+Test now also covers a game (CAGE_TEST_ROM=<rom> nix build --impure ...): choosing a game tile starts RetroArch as a fullscreen Wayland client (Frogger title screen in cage-4-game.png), the UI process keeps its pid, and Esc twice (RetroArch's quit confirmation) returns to the same UI on the Games row with the game tile focused.
+
+Needed for it to work:
+- PLAYER_WAYLAND=1 makes RetroArch use `video_driver = "gl"` and `input_driver = "udev"` (udev reads /dev/input, so quitting does not depend on Wayland keyboard focus, as on the DRM path today). With the Wayland keyboard driver the Esc keys never reached it.
+- Mesa software GL (llvmpipe) at 1080p needs CPU: the VM has 10 cores; with 1 the mpv frame stayed black. RetroArch takes ~10 s to show its first frame there.
+
+Found in the existing code (not cage-related): `run_game` appended `--verbose --log-file` after `--`, so RetroArch treated them as content paths and never wrote its log (the "follow the log live" feature saw nothing). Fixed: the flags now go before `--`. The log now shows real issues, e.g. audio driver init errors in the VM (no HDMI sound card; the VM uses snd-dummy) that deserve a look on the NUC.
+
+Still for the NUC: transition timing at real scanout, game latency, VA-API, passthrough, real audio, 4K and refresh matching.

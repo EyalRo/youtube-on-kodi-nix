@@ -204,6 +204,12 @@
           appliance = pkgs.callPackage ./appliance/package.nix { };
           ui = pkgs.callPackage ./appliance/ui/package.nix { };
           module = ./appliance/module.nix;
+          retroarch =
+            let unfree = import nixpkgs { system = "x86_64-linux"; config.allowUnfree = true; };
+            in unfree.retroarch.withCores (c: [ c.genesis-plus-gx ]);
+          # Set CAGE_TEST_ROM=<path to a small Mega Drive ROM> and build with --impure to include the game subtest.
+          rom = let p = builtins.getEnv "CAGE_TEST_ROM";
+                in if p == "" then null else builtins.path { path = /. + p; name = "test-rom.smd"; };
         };
 
       checks.x86_64-linux.appliance-handoff =
