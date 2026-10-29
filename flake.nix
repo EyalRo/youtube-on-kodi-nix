@@ -212,6 +212,16 @@
                 in if p == "" then null else builtins.path { path = /. + p; name = "test-rom.smd"; };
         };
 
+      # The Controllers page against a fake BlueZ.
+      checks.x86_64-linux.appliance-bluetooth =
+        let pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        in import ./appliance/test-bluetooth.nix {
+          inherit pkgs;
+          appliance = pkgs.callPackage ./appliance/package.nix { };
+          ui = pkgs.callPackage ./appliance/ui/package.nix { };
+          module = ./appliance/module.nix;
+        };
+
       checks.x86_64-linux.appliance-handoff =
         let pkgs = nixpkgs.legacyPackages.x86_64-linux;
         in import ./appliance/test-handoff.nix {

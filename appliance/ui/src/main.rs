@@ -612,6 +612,7 @@ fn bt_worker(ui: slint::Weak<App>, paths: std::sync::Arc<std::sync::Mutex<Vec<St
     let spawned = std::thread::Builder::new().name("bluetooth".into()).spawn(move || {
         let mut session: Option<bt::Session<bluez::Bluez>> = None;
         let mut open = false;
+        let mut last: Option<(String, bool, String)> = None;
         loop {
             let cmd = match rx.recv_timeout(Duration::from_secs(1)) {
                 Ok(c) => c,
@@ -638,6 +639,15 @@ fn bt_worker(ui: slint::Weak<App>, paths: std::sync::Arc<std::sync::Mutex<Vec<St
             }
             if let Some(s) = session.as_mut() {
                 let snap = s.handle(cmd);
+                let summary = (
+                    snap.views.iter().map(|v| format!("{} [{:?}]", v.name, v.state)).collect::<Vec<_>>().join(", "),
+                    snap.scanning,
+                    snap.message.clone(),
+                );
+                if last.as_ref() != Some(&summary) {
+                    tracing::info!(devices = %summary.0, scanning = summary.1, message = %summary.2, "controllers updated");
+                    last = Some(summary);
+                }
                 let paths = paths.clone();
                 let _ = ui.upgrade_in_event_loop(move |ui| apply_bt(&ui, &paths, &snap));
             }
