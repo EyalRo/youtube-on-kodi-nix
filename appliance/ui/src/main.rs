@@ -14,6 +14,10 @@ use std::time::Duration;
 use serde_json::Value;
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 
+// Bluetooth controller setup (logic is unit-tested without D-Bus).
+#[allow(dead_code)]
+mod bt;
+
 slint::include_modules!();
 
 /// Debug logging that exists only in debug builds (`RUSTFLAGS="--cfg appliance_debug"`).
