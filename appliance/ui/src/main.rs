@@ -254,13 +254,20 @@ fn launch(ui: &App, id: &str, inproc: bool, play: &str) {
         tracing::error!(dir = %dir.display(), error = %e, "cannot create the state directory");
     }
     if inproc {
-        let _ = ui.hide();
+        // Spike (cage): UI_HANDOFF=child keeps the window mapped; the compositor puts the player
+        // in front, so the display is never released.
+        let child = env_or("UI_HANDOFF", "exit") == "child";
+        if !child {
+            let _ = ui.hide();
+        }
         let status = Command::new(play).arg(id).status();
         match &status {
             Ok(s) if s.success() => tracing::info!(?status, "play returned"),
             _ => tracing::error!(?status, %id, "play failed"),
         }
-        let _ = ui.show();
+        if !child {
+            let _ = ui.show();
+        }
         ui.set_loading(false);
     } else {
         // Without this file the supervisor will not run `play`, so the press would do nothing.
@@ -635,7 +642,7 @@ fn main() -> Result<(), slint::PlatformError> {
     tracing::info!(debug_build = DEBUG_BUILD, "appliance-ui starting");
     let mediad = env_or("UI_MEDIAD", "127.0.0.1:8730");
     let cache = PathBuf::from(env_or("UI_CACHE", "/tmp/appliance-ui/art"));
-    let inproc = env_or("UI_HANDOFF", "exit") == "inproc";
+    let inproc = matches!(env_or("UI_HANDOFF", "exit").as_str(), "inproc" | "child");
     let play = env_or("UI_PLAY", "play");
 
     let ui = App::new()?;

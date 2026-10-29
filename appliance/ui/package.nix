@@ -1,5 +1,5 @@
 # The living-room UI (Slint on DRM/KMS) and its session supervisor.
-{ lib, rustPlatform, pkg-config, makeWrapper, imagemagick, dejavu_fonts, alsa-utils, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd
+{ lib, rustPlatform, pkg-config, makeWrapper, imagemagick, dejavu_fonts, alsa-utils, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd, wayland
 , debug ? false # compile the debug logs in (see ../package.nix)
 }:
 
@@ -34,7 +34,7 @@ rustPlatform.buildRustPackage {
   '';
 
   nativeBuildInputs = [ pkg-config makeWrapper imagemagick ];
-  buildInputs = [ fontconfig libxkbcommon libinput udev libgbm libGL seatd ];
+  buildInputs = [ fontconfig libxkbcommon libinput udev libgbm libGL seatd wayland ];
 
   postInstall = ''
     # The logo as an 8-bit alpha mask for fbsplash (and a PNG for the boot splash).
@@ -48,7 +48,7 @@ rustPlatform.buildRustPackage {
     # session.sh lives in the ui/ subdir of the combined source.
     install -Dm755 ui/session.sh $out/bin/appliance-ui-session
     # The focus tick is played with aplay.
-    wrapProgram $out/bin/appliance-ui --prefix PATH : ${lib.makeBinPath [ alsa-utils ]}
+    wrapProgram $out/bin/appliance-ui --prefix PATH : ${lib.makeBinPath [ alsa-utils ]} --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ wayland libxkbcommon libGL ]}
   '';
 
   meta = {

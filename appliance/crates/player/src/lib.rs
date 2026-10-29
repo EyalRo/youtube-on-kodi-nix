@@ -111,7 +111,14 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
     .to_vec();
     // mpv has no terminal here, so its own diagnosis goes to a log file (see `run_mpv`).
     a.push(format!("--msg-level=all={}", if applog::DEBUG_BUILD { "v" } else { "warn" }));
-    a.push(format!("--drm-connector={}", cfg.drm_connector));
+    // Spike (cage): PLAYER_WAYLAND=1 makes mpv a fullscreen Wayland client instead of taking the DRM master.
+    if std::env::var_os("PLAYER_WAYLAND").is_some_and(|v| v == "1") {
+        a.retain(|x| x != "--gpu-context=drm");
+        a.push("--gpu-context=wayland".into());
+        a.push("--fs".into());
+    } else {
+        a.push(format!("--drm-connector={}", cfg.drm_connector));
+    }
     a.push(format!("--audio-device={}", cfg.audio_device));
     a.push(format!("--input-ipc-server={}", socket.display()));
     a.extend(cfg.mpv_extra.iter().cloned());

@@ -20,7 +20,7 @@ serde_json = "1"
 tracing = "0.1"
 applog = { path = "../crates/applog" }
 slint = { version = "1.16", default-features = false, features = [
-    "std", "compat-1-2", "backend-linuxkms", "renderer-software", "image-default-formats",
+    "std", "compat-1-2", "backend-linuxkms", "backend-winit-wayland", "renderer-software", "image-default-formats",
 ] }
 
 [build-dependencies]

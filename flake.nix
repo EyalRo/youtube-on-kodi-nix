@@ -196,6 +196,16 @@
           module = ./appliance/module.nix;
         };
 
+      # Spike: UI and player as Wayland clients under cage (no display handoff).
+      checks.x86_64-linux.appliance-cage =
+        let pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        in import ./appliance/test-cage.nix {
+          inherit pkgs;
+          appliance = pkgs.callPackage ./appliance/package.nix { };
+          ui = pkgs.callPackage ./appliance/ui/package.nix { };
+          module = ./appliance/module.nix;
+        };
+
       checks.x86_64-linux.appliance-handoff =
         let pkgs = nixpkgs.legacyPackages.x86_64-linux;
         in import ./appliance/test-handoff.nix {
