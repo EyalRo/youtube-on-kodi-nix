@@ -1,6 +1,8 @@
 # Single-process playback: remove the display handoff
 
-Status: draft for approval. Nothing here is built yet.
+Status: SUPERSEDED (2026-10-29). We chose a kiosk compositor (cage) with the UI, mpv and RetroArch as
+Wayland clients instead of one process; see `2026-10-29-cage-spike-findings.md` and
+`services.media-appliance.kiosk.display = "cage"`. Kept for the reasoning.
 
 ## Intent
 

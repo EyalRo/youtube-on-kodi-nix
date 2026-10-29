@@ -6,7 +6,7 @@
 # `src` is the unpacked release tarball: backend/bin/* and ui/{bin/*,session.sh}. These are
 # drop-in replacements for packages.appliance and packages.appliance-ui.
 { lib, stdenv, autoPatchelfHook, makeWrapper, imagemagick, dejavu_fonts, alsa-utils
-, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd, mpv-unwrapped }:
+, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd, wayland, mpv-unwrapped }:
 
 src: {
   appliance = stdenv.mkDerivation {
@@ -27,9 +27,9 @@ src: {
     version = "latest";
     inherit src;
     nativeBuildInputs = [ autoPatchelfHook makeWrapper imagemagick ];
-    buildInputs = [ stdenv.cc.cc.lib fontconfig libxkbcommon libinput udev libgbm libGL seatd ];
+    buildInputs = [ stdenv.cc.cc.lib fontconfig libxkbcommon libinput udev libgbm libGL seatd wayland ];
     # Libraries Slint opens at run time rather than linking.
-    runtimeDependencies = [ libGL libgbm libinput libxkbcommon seatd udev ];
+    runtimeDependencies = [ libGL libgbm libinput libxkbcommon seatd udev wayland ];
     installPhase = ''
       install -Dm755 -t $out/bin ui/bin/*
       install -Dm755 ui/session.sh $out/bin/appliance-ui-session
@@ -40,7 +40,8 @@ src: {
         -depth 8 gray:$out/share/appliance-ui/logo-1400x300.gray
       magick -size 1400x300 xc:none -font ${dejavu_fonts}/share/fonts/truetype/DejaVuSans-Bold.ttf \
         -pointsize 190 -gravity center -fill "#e50914" -annotate +0+0 Shmetflix $out/share/appliance-ui/logo.png
-      wrapProgram $out/bin/appliance-ui --prefix PATH : ${lib.makeBinPath [ alsa-utils ]}
+      wrapProgram $out/bin/appliance-ui --prefix PATH : ${lib.makeBinPath [ alsa-utils ]} \
+        --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ wayland libxkbcommon libGL ]}
     '';
     meta.mainProgram = "appliance-ui";
   };

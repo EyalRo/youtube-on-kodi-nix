@@ -32,6 +32,24 @@ let
     sprite.SetY(Window.GetHeight() / 2 - logo.GetHeight() / 2);
     EOF
   '';
+
+  # Environment shared by both display modes: where mediad is, the player's devices and programs.
+  uiEnv = {
+    # Absolute: the PAM login session resets PATH, so the unit's `path` never reaches the script.
+    UI_PLAY = "${backend.package}/bin/play";
+    UI_MEDIAD = backend.bind;
+    UI_UPDATE_FILE = backend.updateCheck.file;
+    PLAYER_MEDIAD = backend.bind;
+    PLAYER_AUDIO_DEVICE = cfg.audioDevice;
+    PLAYER_RETROARCH = "${cfg.retroarch}/bin/retroarch";
+    PLAYER_CORE_DIR = "${cfg.retroarch}/lib/retroarch/cores";
+  } // lib.optionalAttrs (cfg.mpvExtraArgs != "") {
+    PLAYER_MPV_ARGS = cfg.mpvExtraArgs;
+  } // lib.optionalAttrs (cfg.victorialogs != null) {
+    # Shared logging library reads VLOGS; covers the UI's own logs and, through the session,
+    # the `play` player it launches.
+    VLOGS = cfg.victorialogs;
+  };
 in
 {
   options.services.media-appliance.kiosk = {
@@ -64,6 +82,17 @@ in
       type = types.bool;
       default = true;
       description = "Quiet the console and show the Shmetflix logo (Plymouth) from the bootloader until the UI draws.";
+    };
+
+    display = mkOption {
+      type = types.enum [ "drm" "cage" ];
+      default = "drm";
+      description = ''
+        How the UI owns the display. "drm": the UI takes the DRM master on tty1, exits to hand the
+        display to the player and restarts (a black gap on every playback). "cage": a kiosk
+        compositor owns the display for the whole session and the UI, mpv and RetroArch are
+        Wayland clients, so starting and leaving a video or game never releases the display.
+      '';
     };
 
     scaleFactor = mkOption {
@@ -132,33 +161,19 @@ in
     fonts.packages = [ pkgs.noto-fonts pkgs.dejavu_fonts ];
     environment.systemPackages = [ cfg.package cfg.retroarch pkgs.mpv pkgs.alsa-utils ];
 
-    # The PAM "login" session gives the user logind access to the DRM and input devices.
-    systemd.services.appliance-ui = {
+    # drm mode: the PAM "login" session gives the user logind access to the DRM and input devices.
+    systemd.services.appliance-ui = mkIf (cfg.display == "drm") {
       description = "Appliance UI (DRM/KMS)";
       wantedBy = [ "multi-user.target" ];
       after = [ "systemd-user-sessions.service" "mediad.service" "sound.target" ] ++ lib.optional cfg.bootSplash "plymouth-start.service";
       wants = [ "mediad.service" ];
       conflicts = [ "getty@tty1.service" ];
       path = [ backend.package cfg.package cfg.retroarch pkgs.mpv pkgs.alsa-utils ];
-      environment = {
+      environment = uiEnv // {
         SLINT_BACKEND = "linuxkms-software";
         SLINT_SCALE_FACTOR = cfg.scaleFactor;
         UI_HANDOFF = "exit";
-        # Absolute: the PAM login session resets PATH, so the unit's `path` never reaches the script.
-        UI_PLAY = "${backend.package}/bin/play";
-        UI_MEDIAD = backend.bind;
-        UI_UPDATE_FILE = backend.updateCheck.file;
-        PLAYER_MEDIAD = backend.bind;
         PLAYER_DRM_CONNECTOR = cfg.drmConnector;
-        PLAYER_AUDIO_DEVICE = cfg.audioDevice;
-        PLAYER_RETROARCH = "${cfg.retroarch}/bin/retroarch";
-        PLAYER_CORE_DIR = "${cfg.retroarch}/lib/retroarch/cores";
-      } // lib.optionalAttrs (cfg.mpvExtraArgs != "") {
-        PLAYER_MPV_ARGS = cfg.mpvExtraArgs;
-      } // lib.optionalAttrs (cfg.victorialogs != null) {
-        # Shared logging library reads VLOGS; covers the UI's own logs and, through the session,
-        # the `play` player it launches.
-        VLOGS = cfg.victorialogs;
       };
       serviceConfig = {
         # Plymouth lets go of the display (keeping its last frame up) just before the UI takes it.
@@ -175,6 +190,35 @@ in
         StandardOutput = "journal";
         StandardError = "journal";
         ExecStart = "${cfg.package}/bin/appliance-ui-session";
+        Restart = "always";
+        RestartSec = 2;
+      };
+    };
+
+    # cage mode: the compositor owns the display for the whole session; the UI is its only client
+    # at start, and launches mpv / RetroArch as further fullscreen Wayland clients (UI_HANDOFF=child),
+    # so nothing ever releases the display. nixpkgs' services.cage runs it on tty1 under the user's
+    # logind session.
+    services.cage = mkIf (cfg.display == "cage") {
+      enable = true;
+      user = cfg.user;
+      program = "${cfg.package}/bin/appliance-ui";
+      environment = uiEnv // {
+        SLINT_BACKEND = "winit";
+        SLINT_SCALE_FACTOR = cfg.scaleFactor;
+        UI_HANDOFF = "child";
+        PLAYER_WAYLAND = "1";
+      };
+    };
+    systemd.services."cage-tty1" = mkIf (cfg.display == "cage") {
+      after = [ "mediad.service" "sound.target" ];
+      wants = [ "mediad.service" ];
+      path = [ backend.package cfg.package cfg.retroarch pkgs.mpv pkgs.alsa-utils ];
+      serviceConfig = {
+        # Plymouth lets go of the display just before the compositor takes it.
+        ExecStartPre = mkIf cfg.bootSplash "-+${pkgs.plymouth}/bin/plymouth quit --retain-splash";
+        StandardOutput = "journal";
+        StandardError = "journal";
         Restart = "always";
         RestartSec = 2;
       };
