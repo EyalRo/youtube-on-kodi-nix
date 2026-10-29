@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "applog"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "serde_json",
  "tracing",
@@ -31,7 +31,7 @@ dependencies = [
 
 [[package]]
 name = "artsync"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "applog",
  "catalog",
@@ -133,7 +133,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "catalog"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "chrono",
  "regex",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "kodiimport"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "applog",
  "catalog",
@@ -526,7 +526,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "mediad"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "applog",
  "axum",
@@ -698,7 +698,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "player"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "applog",
  "mpv",
@@ -854,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "scanner"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "catalog",
  "chrono",
@@ -992,7 +992,7 @@ dependencies = [
 
 [[package]]
 name = "store"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "applog",
  "catalog",
@@ -1395,7 +1395,7 @@ dependencies = [
 
 [[package]]
 name = "ytsync"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "applog",
  "catalog",

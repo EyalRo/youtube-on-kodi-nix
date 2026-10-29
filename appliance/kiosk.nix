@@ -33,6 +33,14 @@ let
     EOF
   '';
 
+  # cage mode: set the wanted output mode (if any) before the UI draws its first frame.
+  cageSession = pkgs.writeShellScript "appliance-cage-session" ''
+    ${lib.optionalString (cfg.outputMode != null) ''
+      ${pkgs.wlr-randr}/bin/wlr-randr --output ${cfg.drmConnector} --mode ${cfg.outputMode} || true
+    ''}
+    exec ${cfg.package}/bin/appliance-ui
+  '';
+
   # Environment shared by both display modes: where mediad is, the player's devices and programs.
   uiEnv = {
     # Absolute: the PAM login session resets PATH, so the unit's `path` never reaches the script.
@@ -92,6 +100,16 @@ in
         display to the player and restarts (a black gap on every playback). "cage": a kiosk
         compositor owns the display for the whole session and the UI, mpv and RetroArch are
         Wayland clients, so starting and leaving a video or game never releases the display.
+      '';
+    };
+
+    outputMode = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "3840x2160@60";
+      description = ''
+        cage mode only: the output mode to set before the UI starts (`wlr-randr --mode`). Without it
+        cage keeps the TV's preferred mode, which is often a 30 Hz one on 4K TVs. The output is `drmConnector`.
       '';
     };
 
@@ -202,7 +220,7 @@ in
     services.cage = mkIf (cfg.display == "cage") {
       enable = true;
       user = cfg.user;
-      program = "${cfg.package}/bin/appliance-ui";
+      program = "${cageSession}";
       environment = uiEnv // {
         SLINT_BACKEND = "winit";
         SLINT_SCALE_FACTOR = cfg.scaleFactor;
