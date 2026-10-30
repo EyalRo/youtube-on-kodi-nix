@@ -15,21 +15,30 @@ use serde_json::{Value, json};
 const EVENT_SIZE: usize = 24;
 const EV_KEY: u16 = 1;
 
-/// The mpv command for a key code, if that key does anything during playback.
-pub fn command_for(code: u16, repeat: bool) -> Option<Value> {
-    // Only seeking repeats while a key is held; stop and pause fire once per press.
-    let seek = |secs: i32| Some(json!({ "command": ["seek", secs, "relative"] }));
+/// The overlay script's name for a key code, if that key does anything during playback. Held
+/// keys repeat only for the directions (seeking, moving through a list).
+pub fn key_name(code: u16, repeat: bool) -> Option<&'static str> {
     match code {
-        // back (BACK, ESC, BACKSPACE), STOP, STOPCD, Q
-        1 | 14 | 16 | 158 | 128 | 166 if !repeat => Some(json!({ "command": ["quit"] })),
-        // select (ENTER), SPACE, PLAYPAUSE, PLAY, PAUSE
-        57 | 28 | 164 | 207 | 119 if !repeat => Some(json!({ "command": ["cycle", "pause"] })),
-        105 | 168 => seek(-10), // LEFT, REWIND
-        106 | 208 => seek(30),  // RIGHT, FASTFORWARD
-        108 => seek(-60),       // DOWN
-        103 => seek(60),        // UP
+        // back (BACK, ESC, BACKSPACE)
+        1 | 14 | 158 if !repeat => Some("back"),
+        // STOP, STOPCD, Q
+        16 | 128 | 166 if !repeat => Some("stop"),
+        // select (ENTER, KPENTER)
+        28 | 96 if !repeat => Some("ok"),
+        // SPACE, PLAYPAUSE, PLAY, PAUSE
+        57 | 164 | 207 | 119 if !repeat => Some("playpause"),
+        105 | 168 => Some("left"),  // LEFT, REWIND
+        106 | 208 => Some("right"), // RIGHT, FASTFORWARD
+        108 => Some("down"),
+        103 => Some("up"),
         _ => None,
     }
+}
+
+/// The mpv IPC command that hands a key to the overlay script (`pausemenu.lua`).
+pub fn command_for(code: u16, repeat: bool) -> Option<Value> {
+    key_name(code, repeat)
+        .map(|name| json!({ "command": ["script-message-to", "pausemenu", "key", name] }))
 }
 
 /// `(code, repeat)` of a key press (or auto-repeat) in a raw `input_event`; releases and other
@@ -59,15 +68,6 @@ fn send(socket: &PathBuf, command: &Value) {
     }
 }
 
-/// mpv's OSC bar hides after a timeout and shows on user interaction. IPC commands
-/// sent by this player (seek/pause) do not count as user input, so nudge the bar
-/// visible with the message the OSC script listens for (`script-message-to osc
-/// osc-visibility auto`).
-fn wake_osd(socket: &PathBuf) {
-    let show = json!({ "command": ["script-message-to", "osc", "osc-visibility", "auto"] });
-    send(socket, &show);
-}
-
 /// Start one reader per input device; each lives until the player process exits.
 pub fn watch(socket: PathBuf) {
     let Ok(dir) = std::fs::read_dir("/dev/input") else { return };
@@ -93,7 +93,6 @@ pub fn watch(socket: PathBuf) {
                     applog::debug!(code, repeat, command = ?cmd, "key during playback");
                     if let Some(cmd) = cmd {
                         send(&socket, &cmd);
-                        wake_osd(&socket);
                     }
                 }
             }
@@ -122,12 +121,17 @@ mod tests {
     }
 
     #[test]
-    fn stop_pause_and_seek_commands() {
+    fn keys_go_to_the_overlay_script() {
         let cmd = |c, r| command_for(c, r).map(|v| v.to_string());
-        assert_eq!(cmd(1, false).as_deref(), Some(r#"{"command":["quit"]}"#));
-        assert_eq!(cmd(1, true), None, "a held Esc must not quit twice");
-        assert_eq!(cmd(57, false).as_deref(), Some(r#"{"command":["cycle","pause"]}"#));
-        assert_eq!(cmd(106, true).as_deref(), Some(r#"{"command":["seek",30,"relative"]}"#));
-        assert_eq!(cmd(30, false), None); // KEY_A
+        assert_eq!(
+            cmd(1, false).as_deref(),
+            Some(r#"{"command":["script-message-to","pausemenu","key","back"]}"#)
+        );
+        assert_eq!(cmd(1, true), None, "a held Esc must not act twice");
+        assert_eq!(key_name(28, false), Some("ok"));
+        assert_eq!(key_name(164, false), Some("playpause"));
+        assert_eq!(key_name(16, false), Some("stop"));
+        assert_eq!(key_name(106, true), Some("right"), "a held direction repeats");
+        assert_eq!(key_name(30, false), None); // KEY_A
     }
 }

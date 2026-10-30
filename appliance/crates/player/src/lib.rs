@@ -86,6 +86,14 @@ pub fn core_for(system: &str) -> Option<&'static str> {
     })
 }
 
+/// The overlay script, written beside the IPC socket for mpv to load. Its file name is its script
+/// name, which `keys.rs` addresses.
+pub const PAUSE_MENU: &str = include_str!("pausemenu.lua");
+
+pub fn pause_menu_path(socket: &Path) -> PathBuf {
+    socket.with_file_name("pausemenu.lua")
+}
+
 /// mpv on the bare display: DRM output, VA-API decode, AC-3/E-AC-3 passthrough to the TV.
 /// **Untested on the target hardware**: these values are what the NUC spike has to confirm.
 pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
@@ -99,13 +107,13 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
         "--save-position-on-quit=no",
         "--audio-spdif=ac3,eac3",
         "--audio-channels=auto-safe",
-        // Playback overlay: mpv's built-in OSC bar (progress, time, seek/pause).
-        // auto = appear on interaction (buttons, seek, pause) and hide ~1s after
-        // the last interaction (hidetimeout is in ms); osd-level 1 keeps the OSD to the OSC (level 3 pins a permanent time/percent status line over the video).
-        // The UI and mpv are separate processes (D2), so the overlay must be
-        // mpv-rendered on the same DRM plane, never a Slint screen.
-        "--script-opts=osc-visibility=auto,osc-hidetimeout=1000",
+        // Playback overlay: `pausemenu.lua` (see `PAUSE_MENU`) replaces mpv's OSC. The UI and mpv
+        // are separate processes (D2), so the overlay must be mpv-rendered, never a Slint screen.
+        // osd-level 1 keeps volume messages; the script shows the bar after a seek itself.
+        "--osc=no",
         "--osd-level=1",
+        "--osd-on-seek=no",
+        "--osd-bar=no",
     ]
     .map(String::from)
     .to_vec();
@@ -121,6 +129,7 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
     }
     a.push(format!("--audio-device={}", cfg.audio_device));
     a.push(format!("--input-ipc-server={}", socket.display()));
+    a.push(format!("--script={}", pause_menu_path(socket).display()));
     a.extend(cfg.mpv_extra.iter().cloned());
     if play.resume_position > 0.0 {
         a.push(format!("--start={}", play.resume_position));
@@ -199,6 +208,9 @@ fn run_mpv(cfg: &Config, play: &Play) -> Result<(), PlayError> {
     let dir = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
     let socket = dir.join(format!("play-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&socket);
+    let script = pause_menu_path(&socket);
+    std::fs::write(&script, PAUSE_MENU)
+        .map_err(|e| PlayError::Launch(format!("cannot write {}: {e}", script.display())))?;
     tracing::info!(id = %play.id, "libmpv playing in-process");
     let fin = libmpv::run(cfg, play, &socket, cfg.progress_interval, |pos, dur| {
         applog::debug!(id = %play.id, position = pos, duration = dur, "reporting progress");
@@ -209,7 +221,9 @@ fn run_mpv(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         ) {
             tracing::warn!(error = %e, "could not save progress");
         }
-    })?;
+    });
+    let _ = std::fs::remove_file(&script);
+    let fin = fin?;
     tracing::info!(id = %play.id, position = fin.position, duration = fin.duration, finished = fin.finished, "playback ended");
     // The UI test and dashboards key on the "mpv exited ... exit status: 0" line the
     // external-binary player emitted; keep the same contract now that libmpv runs in-process.
@@ -414,9 +428,8 @@ mod tests {
         );
         assert!(a.contains("--start=125.5") && a.contains("--input-ipc-server=/run/p.sock"));
         assert!(
-            a.contains("--script-opts=osc-visibility=auto,osc-hidetimeout=1000")
-                && a.contains("--osd-level=1"),
-            "the mpv OSC overlay must be enabled"
+            a.contains("--osc=no") && a.contains("--script=/run/pausemenu.lua"),
+            "the pause overlay script replaces the OSC"
         );
         assert!(a.ends_with("-- /media/movies/Alien.mkv"));
         assert!(
