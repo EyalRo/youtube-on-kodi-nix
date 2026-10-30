@@ -176,18 +176,32 @@ local function draw_panel(title)
     return x, y, w, h
 end
 
+local function delay_label()
+    local d = mp.get_property_number("sub-delay") or 0
+    if math.abs(d) < 0.05 then
+        return "0.0 s"
+    end
+    return string.format("%+.1f s", d)
+end
+
 local function draw_menu()
     local x, y, w = draw_panel("Settings")
-    for i, row in ipairs({ { "Audio", "audio" }, { "Subtitles", "sub" } }) do
+    local rows = {
+        { "Audio", current_label("audio") },
+        { "Subtitles", current_label("sub") },
+        { "Subtitle delay", "<  " .. delay_label() .. "  >" },
+    }
+    for i, row in ipairs(rows) do
         local ry = y + 100 + (i - 1) * 80
         if i == menu_cursor then
             rect(x + 20, ry - 8, w - 40, 64, ACCENT)
         end
         local fg = i == menu_cursor and "000000" or "FFFFFF"
         text(x + 40, ry + 24, 30, row[1], fg, 4)
-        text(x + w - 40, ry + 24, 28, clip(current_label(row[2]), 34), fg, 6)
+        text(x + w - 40, ry + 24, 28, clip(row[2], 34), fg, 6)
     end
-    text(x + 40, y + 440, 24, "OK change    Back close", "B0B0B0", 4)
+    local hint = menu_cursor == 3 and "Left/Right adjust 0.1 s    OK reset    Back close" or "OK change    Back close"
+    text(x + 40, y + 440, 24, hint, "B0B0B0", 4)
 end
 
 local VISIBLE = 7
@@ -258,14 +272,29 @@ local function move(cursor, n, delta)
     return math.max(1, math.min(n, cursor + delta))
 end
 
+-- Subtitle delay moves in tenths of a second; positive shows subtitles later. Rounding keeps
+-- repeated steps from drifting (0.1 is not exact in floating point).
+local function nudge_sub_delay(tenths)
+    local d = math.floor((mp.get_property_number("sub-delay") or 0) * 10 + 0.5) + tenths
+    mp.set_property_number("sub-delay", d / 10)
+end
+
 local function menu_key(name)
     if name == "up" then
-        menu_cursor = move(menu_cursor, 2, -1)
+        menu_cursor = move(menu_cursor, 3, -1)
     elseif name == "down" then
-        menu_cursor = move(menu_cursor, 2, 1)
+        menu_cursor = move(menu_cursor, 3, 1)
+    elseif name == "left" and menu_cursor == 3 then
+        nudge_sub_delay(-1)
+    elseif name == "right" and menu_cursor == 3 then
+        nudge_sub_delay(1)
     elseif name == "ok" then
-        open_list(menu_cursor == 1 and "audio" or "sub")
-        return
+        if menu_cursor == 3 then
+            mp.set_property_number("sub-delay", 0)
+        else
+            open_list(menu_cursor == 1 and "audio" or "sub")
+            return
+        end
     elseif name == "back" then
         set_mode("paused")
         return
@@ -359,6 +388,11 @@ end)
 -- Keep the progress and the shown choices current while the overlay is up.
 mp.observe_property("time-pos", "number", function()
     if mode ~= "hidden" then
+        render()
+    end
+end)
+mp.observe_property("sub-delay", "number", function()
+    if mode == "menu" then
         render()
     end
 end)
