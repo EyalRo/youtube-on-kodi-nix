@@ -51,6 +51,8 @@ let
     PLAYER_AUDIO_DEVICE = cfg.audioDevice;
     PLAYER_RETROARCH = "${cfg.retroarch}/bin/retroarch";
     PLAYER_CORE_DIR = "${cfg.retroarch}/lib/retroarch/cores";
+    # The pad profiles: without them RetroArch sees a controller but maps none of its buttons.
+    PLAYER_AUTOCONFIG_DIR = "${pkgs.retroarch-joypad-autoconfig}/share/libretro/autoconfig";
   } // lib.optionalAttrs (cfg.mpvExtraArgs != "") {
     PLAYER_MPV_ARGS = cfg.mpvExtraArgs;
   } // lib.optionalAttrs (cfg.victorialogs != null) {

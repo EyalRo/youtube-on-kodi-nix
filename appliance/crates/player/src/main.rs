@@ -22,6 +22,7 @@ fn main() -> ExitCode {
             "PLAYER_CORE_DIR",
             "/run/current-system/sw/lib/retroarch/cores",
         )),
+        autoconfig_dir: std::env::var_os("PLAYER_AUTOCONFIG_DIR").map(PathBuf::from),
         drm_connector: env_or("PLAYER_DRM_CONNECTOR", "HDMI-A-1"),
         audio_device: env_or("PLAYER_AUDIO_DEVICE", "alsa/hdmi:CARD=PCH,DEV=0"),
         mpv_extra: env_or("PLAYER_MPV_ARGS", "")

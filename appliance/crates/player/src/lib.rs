@@ -62,6 +62,9 @@ pub struct Config {
     pub retroarch: PathBuf,
     /// Directory holding `<core>_libretro.so` files.
     pub core_dir: PathBuf,
+    /// Directory of RetroArch's joypad profiles (`retroarch-joypad-autoconfig`). Without it
+    /// RetroArch finds a pad but maps none of its buttons ("not configured").
+    pub autoconfig_dir: Option<PathBuf>,
     /// The DRM connector and ALSA device of the one TV.
     pub drm_connector: String,
     pub audio_device: String,
@@ -161,7 +164,11 @@ pub fn retroarch_overrides(cfg: &Config, system: Option<&str>) -> String {
     } else {
         RETROARCH_OVERRIDES.to_string()
     };
-    let mut out = format!("{base}audio_driver = \"alsa\"\naudio_device = \"{device}\"\naudio_enable = \"true\"\naudio_mute_enable = \"false\"\naudio_out_rate = \"48000\"\naudio_latency = \"128\"\naudio_sync = \"true\"\nvideo_vsync = \"true\"\n");
+    let mut out = base;
+    if let Some(dir) = &cfg.autoconfig_dir {
+        out.push_str(&format!("joypad_autoconfig_dir = \"{}\"\n", dir.display()));
+    }
+    out.push_str(&format!("audio_driver = \"alsa\"\naudio_device = \"{device}\"\naudio_enable = \"true\"\naudio_mute_enable = \"false\"\naudio_out_rate = \"48000\"\naudio_latency = \"128\"\naudio_sync = \"true\"\nvideo_vsync = \"true\"\n"));
     // Some pads can put their D-pad on the left stick (the 8BitDo M30 does, by a button chord), where
     // RetroArch's profile expects a D-pad hat and ignores it. For digital-only systems let the left
     // stick act as the D-pad, so such a pad still works. Not for N64: there the stick is a real analog.
@@ -401,6 +408,7 @@ mod tests {
             mpv: "mpv".into(),
             retroarch: "retroarch".into(),
             core_dir: "/cores".into(),
+            autoconfig_dir: Some("/autoconfig".into()),
             drm_connector: "HDMI-A-1".into(),
             audio_device: "alsa/hdmi:CARD=PCH,DEV=0".into(),
             mpv_extra: vec![],
@@ -447,6 +455,15 @@ mod tests {
         let a = mpv_args(&c, &play("movie", 0.0), Path::new("/s"));
         let pos = |s: &str| a.iter().position(|x| x == s).unwrap();
         assert!(pos("--vo=null") > pos("--vo=gpu") && pos("--pause") < pos("--"));
+    }
+
+    #[test]
+    fn retroarch_finds_the_joypad_profiles() {
+        let o = retroarch_overrides(&cfg(), Some("snes"));
+        assert!(o.contains("joypad_autoconfig_dir = \"/autoconfig\""), "{o}");
+        let mut c = cfg();
+        c.autoconfig_dir = None;
+        assert!(!retroarch_overrides(&c, Some("snes")).contains("joypad_autoconfig_dir"));
     }
 
     #[test]
