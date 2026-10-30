@@ -17,6 +17,7 @@ use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 // Bluetooth controller setup (logic is unit-tested without D-Bus).
 mod bt;
 mod bluez;
+mod gamepad;
 
 slint::include_modules!();
 
@@ -264,7 +265,9 @@ fn launch(ui: &App, id: &str, inproc: bool, play: &str) {
         if !child {
             let _ = ui.hide();
         }
+        PLAYING.store(true, std::sync::atomic::Ordering::SeqCst);
         let status = Command::new(play).arg(id).status();
+        PLAYING.store(false, std::sync::atomic::Ordering::SeqCst);
         match &status {
             Ok(s) if s.success() => tracing::info!(?status, "play returned"),
             _ => tracing::error!(?status, %id, "play failed"),
@@ -659,10 +662,49 @@ fn bt_worker(ui: slint::Weak<App>, paths: std::sync::Arc<std::sync::Mutex<Vec<St
     tx
 }
 
-/// Back and home on the remote. The key mapping delivers them as an empty key (text "\0"), the
-/// same for every button it does not know, so read the kernel's input events as the player does.
-/// Codes: KEY_BACK 158, KEY_HOMEPAGE 172.
-fn watch_remote(ui: slint::Weak<App>) {
+/// True while a player runs as a child of the UI: the UI is behind it and must not react to the
+/// buttons pressed for the game (they would also queue up and fire when the player exits).
+static PLAYING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn playing() -> bool {
+    PLAYING.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// The range of one absolute axis, from the kernel (EVIOCGABS); a typical byte range if unknown.
+fn abs_range(fd: i32, code: u16) -> (i32, i32) {
+    let mut info = [0i32; 6]; // struct input_absinfo: value, minimum, maximum, fuzz, flat, resolution
+    // EVIOCGABS(abs) = _IOR('E', 0x40 + abs, struct input_absinfo), 24 bytes.
+    let req: libc::c_ulong = 0x8018_4540 + code as libc::c_ulong;
+    // SAFETY: `info` is the 24-byte struct the request writes, and `fd` is an open evdev file.
+    let r = unsafe { libc::ioctl(fd, req, info.as_mut_ptr()) };
+    if r == 0 && info[2] > info[1] { (info[1], info[2]) } else { (0, 255) }
+}
+
+/// Make the UI see a navigation key from a game controller.
+fn press_nav(ui: &slint::Weak<App>, nav: gamepad::Nav) {
+    use slint::platform::{Key, WindowEvent};
+    // Back is Backspace (go back a level), not Escape, which quits the UI on the home screen.
+    let key: SharedString = match nav {
+        gamepad::Nav::Up => Key::UpArrow.into(),
+        gamepad::Nav::Down => Key::DownArrow.into(),
+        gamepad::Nav::Left => Key::LeftArrow.into(),
+        gamepad::Nav::Right => Key::RightArrow.into(),
+        gamepad::Nav::Select => Key::Return.into(),
+        gamepad::Nav::Back => Key::Backspace.into(),
+    };
+    let _ = ui.upgrade_in_event_loop(move |ui| {
+        let w = ui.window();
+        w.dispatch_event(WindowEvent::KeyPressed { text: key.clone() });
+        w.dispatch_event(WindowEvent::KeyReleased { text: key });
+    });
+}
+
+/// Read one input device for as long as it exists. A game controller drives the UI like arrow keys;
+/// anything else is a remote, whose Back, Home and menu keys the key mapping delivers as an empty key
+/// (text "\0"), the same for every button it does not know, so we read the kernel's events as the
+/// player does. Codes: KEY_BACK 158, KEY_HOMEPAGE 172.
+fn watch_device(path: PathBuf, ui: slint::Weak<App>, watched: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>) {
+    use std::os::fd::AsRawFd;
     use std::sync::Mutex;
     const KEY_BACK: u16 = 158;
     const KEY_HOMEPAGE: u16 = 172;
@@ -671,64 +713,96 @@ fn watch_remote(ui: slint::Weak<App>) {
     const MENU_KEYS: [u16; 6] = [139, 141, 127, 357, 358, 438];
     // The remote shows up as several devices; one press must act once.
     static LAST: Mutex<[Option<std::time::Instant>; 3]> = Mutex::new([None, None, None]);
-    let Ok(dir) = std::fs::read_dir("/dev/input") else {
-        tracing::warn!("cannot list /dev/input; the remote's back and home buttons will not work");
-        return;
-    };
-    for path in dir.filter_map(Result::ok).map(|e| e.path()) {
-        if !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("event")) {
-            continue;
+    let mut dev = match std::fs::File::open(&path) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(device = %path.display(), error = %e, "cannot open an input device");
+            watched.lock().unwrap().remove(&path);
+            return;
         }
-        let mut dev = match std::fs::File::open(&path) {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::warn!(device = %path.display(), error = %e, "cannot open an input device");
+    };
+    let node = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    let caps = std::fs::read_to_string(format!("/sys/class/input/{node}/device/capabilities/key")).unwrap_or_default();
+    let name = std::fs::read_to_string(format!("/sys/class/input/{node}/device/name")).unwrap_or_default();
+    let mut pad = gamepad::is_gamepad(&caps).then(|| {
+        let fd = dev.as_raw_fd();
+        let (x, y) = (abs_range(fd, 0), abs_range(fd, 1));
+        gamepad::Pad::new(gamepad::Axis::new(x.0, x.1), gamepad::Axis::new(y.0, y.1))
+    });
+    tracing::info!(device = %path.display(), name = %name.trim(), gamepad = pad.is_some(), "watching an input device");
+    std::thread::spawn(move || {
+        let mut ev = [0u8; 24];
+        while dev.read_exact(&mut ev).is_ok() {
+            let (kind, code, value) = (
+                u16::from_le_bytes([ev[16], ev[17]]),
+                u16::from_le_bytes([ev[18], ev[19]]),
+                i32::from_le_bytes([ev[20], ev[21], ev[22], ev[23]]),
+            );
+            if playing() {
                 continue;
             }
-        };
-        applog::debug!(device = %path.display(), "watching an input device for the back and home buttons");
-        let ui = ui.clone();
-        std::thread::spawn(move || {
-            let mut ev = [0u8; 24];
-            while dev.read_exact(&mut ev).is_ok() {
-                let (kind, code, value) = (
-                    u16::from_le_bytes([ev[16], ev[17]]),
-                    u16::from_le_bytes([ev[18], ev[19]]),
-                    i32::from_le_bytes([ev[20], ev[21], ev[22], ev[23]]),
-                );
-                if kind != 1 || value != 1 {
-                    continue; // button presses only
+            if let Some(pad) = pad.as_mut() {
+                if let Some(nav) = pad.event(kind, code, value) {
+                    applog::debug!(?nav, "game controller navigation");
+                    press_nav(&ui, nav);
                 }
-                applog::debug!(code, "input device button press");
-                let slot = match code {
-                    KEY_BACK => 0,
-                    KEY_HOMEPAGE => 1,
-                    c if MENU_KEYS.contains(&c) => 2,
-                    _ => {
-                        // Info, not debug: when a remote button does nothing, this names its code.
-                        if !(code < 100 || [103, 105, 106, 108].contains(&code)) {
-                            applog::debug!(code, "unmapped remote key");
-                        }
-                        continue;
-                    }
-                };
-                {
-                    let mut last = LAST.lock().unwrap();
-                    if last[slot].is_some_and(|t| t.elapsed() < Duration::from_millis(250)) {
-                        continue;
-                    }
-                    last[slot] = Some(std::time::Instant::now());
-                }
-                tracing::info!(button = match slot { 0 => "back", 1 => "home", _ => "menu" }, "remote button");
-                let _ = ui.upgrade_in_event_loop(move |ui| {
-                    if slot == 0 { ui.invoke_go_back() }
-                    else if slot == 1 { ui.invoke_go_home() }
-                    else { ui.invoke_menu() }
-                });
+                continue;
             }
-            tracing::warn!(device = %path.display(), "input device closed");
-        });
-    }
+            if kind != 1 || value != 1 {
+                continue; // button presses only
+            }
+            applog::debug!(code, "input device button press");
+            let slot = match code {
+                KEY_BACK => 0,
+                KEY_HOMEPAGE => 1,
+                c if MENU_KEYS.contains(&c) => 2,
+                _ => {
+                    if !(code < 100 || [103, 105, 106, 108].contains(&code)) {
+                        applog::debug!(code, "unmapped remote key");
+                    }
+                    continue;
+                }
+            };
+            {
+                let mut last = LAST.lock().unwrap();
+                if last[slot].is_some_and(|t| t.elapsed() < Duration::from_millis(250)) {
+                    continue;
+                }
+                last[slot] = Some(std::time::Instant::now());
+            }
+            tracing::info!(button = match slot { 0 => "back", 1 => "home", _ => "menu" }, "remote button");
+            let _ = ui.upgrade_in_event_loop(move |ui| {
+                if slot == 0 { ui.invoke_go_back() }
+                else if slot == 1 { ui.invoke_go_home() }
+                else { ui.invoke_menu() }
+            });
+        }
+        tracing::info!(device = %path.display(), "input device closed");
+        // Let the rescan watch this node again if a device comes back under the same name.
+        watched.lock().unwrap().remove(&path);
+    });
+}
+
+/// Watch every input device, including ones that appear later: a Bluetooth controller connects
+/// after the UI has started, so the device list is rescanned every couple of seconds.
+fn watch_remote(ui: slint::Weak<App>) {
+    std::thread::spawn(move || {
+        let watched = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::<PathBuf>::new()));
+        loop {
+            match std::fs::read_dir("/dev/input") {
+                Ok(dir) => {
+                    for path in dir.filter_map(Result::ok).map(|e| e.path()) {
+                        let is_event = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("event"));
+                        if is_event && watched.lock().unwrap().insert(path.clone()) {
+                            watch_device(path, ui.clone(), watched.clone());
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "cannot list /dev/input; the remote and controllers will not work"),
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
 }
 
 fn main() -> Result<(), slint::PlatformError> {

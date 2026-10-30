@@ -3,7 +3,7 @@
 { pkgs, appliance, ui, module }:
 
 let
-  python = pkgs.python3.withPackages (p: [ p.dbus-fast ]);
+  python = pkgs.python3.withPackages (p: [ p.dbus-fast p.evdev ]);
 in
 pkgs.testers.runNixOSTest {
   name = "media-appliance-bluetooth";
@@ -11,6 +11,7 @@ pkgs.testers.runNixOSTest {
   nodes.machine = { pkgs, ... }: {
     imports = [ module ];
     boot.initrd.kernelModules = [ "virtio_gpu" ];
+    boot.kernelModules = [ "uinput" ];
     virtualisation.memorySize = 3072;
     virtualisation.cores = 4;
     virtualisation.qemu.options = [ "-vga none" "-device virtio-gpu-pci,xres=1920,yres=1080" ];
@@ -132,5 +133,26 @@ pkgs.testers.runNixOSTest {
         key("esc")    # any other button closes Settings
         machine.sleep(2)
         shot("bt-6-home")
+
+    def pad(*actions):
+        # A pad that connects after the UI started: created, found by the UI's rescan, then driven.
+        machine.succeed("${python}/bin/python3 ${./test-fake-pad.py} " + " ".join(actions))
+
+    def count(text):
+        return int(machine.succeed(f"journalctl -u ui.service --no-pager -o cat | grep -cF '{text}' || true").strip())
+
+    with subtest("a game controller that connects later drives the UI: hat, stick and buttons"):
+        opened, closed = count("controllers page opened"), count("controllers page closed")
+        # D-pad hat up reaches the top bar; A selects Settings; A selects Controllers.
+        pad("hat:y:-1", "hat:y:0", "btn:south:1", "btn:south:0", "btn:south:1", "btn:south:0")
+        wait_ui("watching an input device")
+        assert '"gamepad":true' in ui_log(), ui_log()
+        machine.wait_until_succeeds(f"test $(journalctl -u ui.service --no-pager -o cat | grep -cF 'controllers page opened') -gt {opened}", timeout=30)
+        shot("bt-7-pad-controllers")
+        # The left stick as a D-pad (down), then B goes back: Controllers -> Settings -> closed.
+        pad("stick:y:65535", "stick:y:32768", "btn:east:1", "btn:east:0", "btn:east:1", "btn:east:0")
+        machine.wait_until_succeeds(f"test $(journalctl -u ui.service --no-pager -o cat | grep -cF 'controllers page closed') -gt {closed}", timeout=30)
+        machine.sleep(2)
+        shot("bt-8-pad-back")
   '';
 }

@@ -142,7 +142,8 @@ const RETROARCH_OVERRIDES: &str =
 /// them RetroArch picks its own default driver and device, and the game runs silent. The 48 kHz
 /// rate matches the HDMI sink, and the 128 ms buffer (default 64) rides out frame-time hitches
 /// that would otherwise underrun the ALSA ring and chop the sound.
-pub fn retroarch_overrides(cfg: &Config) -> String {
+/// `system` is the game's system id: on a digital-only system the left stick also acts as the D-pad (see below).
+pub fn retroarch_overrides(cfg: &Config, system: Option<&str>) -> String {
     let device = cfg.audio_device.strip_prefix("alsa/").unwrap_or(&cfg.audio_device);
     // Spike (cage): PLAYER_WAYLAND=1 runs RetroArch as a Wayland client (GL) instead of the DRM driver.
     let base = if std::env::var_os("PLAYER_WAYLAND").is_some_and(|v| v == "1") {
@@ -150,7 +151,16 @@ pub fn retroarch_overrides(cfg: &Config) -> String {
     } else {
         RETROARCH_OVERRIDES.to_string()
     };
-    format!("{base}audio_driver = \"alsa\"\naudio_device = \"{device}\"\naudio_enable = \"true\"\naudio_mute_enable = \"false\"\naudio_out_rate = \"48000\"\naudio_latency = \"128\"\naudio_sync = \"true\"\nvideo_vsync = \"true\"\n")
+    let mut out = format!("{base}audio_driver = \"alsa\"\naudio_device = \"{device}\"\naudio_enable = \"true\"\naudio_mute_enable = \"false\"\naudio_out_rate = \"48000\"\naudio_latency = \"128\"\naudio_sync = \"true\"\nvideo_vsync = \"true\"\n");
+    // Some pads can put their D-pad on the left stick (the 8BitDo M30 does, by a button chord), where
+    // RetroArch's profile expects a D-pad hat and ignores it. For digital-only systems let the left
+    // stick act as the D-pad, so such a pad still works. Not for N64: there the stick is a real analog.
+    if system != Some("n64") {
+        for p in 1..=4 {
+            out.push_str(&format!("input_player{p}_analog_dpad_mode = \"1\"\n"));
+        }
+    }
+    out
 }
 
 pub fn retroarch_args(cfg: &Config, play: &Play, overrides: &Path) -> Result<Vec<String>, PlayError> {
@@ -291,7 +301,7 @@ fn forward_log(stream: impl std::io::Read + Send + 'static, id: &str) -> std::th
 
 fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
     let overrides = std::env::temp_dir().join(format!("retroarch-overrides-{}.cfg", std::process::id()));
-    std::fs::write(&overrides, retroarch_overrides(cfg)).map_err(|e| {
+    std::fs::write(&overrides, retroarch_overrides(cfg, play.system.as_deref())).map_err(|e| {
         tracing::error!(path = %overrides.display(), error = %e, "cannot write retroarch overrides");
         PlayError::Launch(format!("cannot write {}: {e}", overrides.display()))
     })?;
@@ -427,8 +437,24 @@ mod tests {
 
     #[test]
     fn retroarch_plays_through_the_tv_audio_device() {
-        let o = retroarch_overrides(&cfg());
+        let o = retroarch_overrides(&cfg(), Some("genesis"));
         assert!(o.contains("audio_driver = \"alsa\"") && o.contains("audio_device = \"hdmi:CARD=PCH,DEV=0\""), "{o}");
+    }
+
+    #[test]
+    fn a_pad_with_its_dpad_on_the_left_stick_still_works_on_digital_systems() {
+        for system in ["genesis", "snes", "neogeo", "nes"] {
+            let o = retroarch_overrides(&cfg(), Some(system));
+            for p in 1..=4 {
+                assert!(o.contains(&format!("input_player{p}_analog_dpad_mode = \"1\"")), "{system}: {o}");
+            }
+        }
+    }
+
+    #[test]
+    fn n64_keeps_the_stick_as_an_analog_stick() {
+        let o = retroarch_overrides(&cfg(), Some("n64"));
+        assert!(!o.contains("analog_dpad_mode"), "{o}");
     }
 
     #[test]
