@@ -35,10 +35,13 @@ pub fn key_name(code: u16, repeat: bool) -> Option<&'static str> {
     }
 }
 
-/// The mpv IPC command that hands a key to the overlay script (`pausemenu.lua`).
+/// The mpv IPC command for a key. Stop goes straight to mpv, so it still works if the overlay
+/// script is not running; everything else goes to the script (`pausemenu.lua`).
 pub fn command_for(code: u16, repeat: bool) -> Option<Value> {
-    key_name(code, repeat)
-        .map(|name| json!({ "command": ["script-message-to", "pausemenu", "key", name] }))
+    key_name(code, repeat).map(|name| match name {
+        "stop" => json!({ "command": ["quit"] }),
+        _ => json!({ "command": ["script-message-to", "pausemenu", "key", name] }),
+    })
 }
 
 /// `(code, repeat)` of a key press (or auto-repeat) in a raw `input_event`; releases and other
@@ -128,6 +131,7 @@ mod tests {
             Some(r#"{"command":["script-message-to","pausemenu","key","back"]}"#)
         );
         assert_eq!(cmd(1, true), None, "a held Esc must not act twice");
+        assert_eq!(cmd(16, false).as_deref(), Some(r#"{"command":["quit"]}"#), "stop must not depend on the script");
         assert_eq!(key_name(28, false), Some("ok"));
         assert_eq!(key_name(164, false), Some("playpause"));
         assert_eq!(key_name(16, false), Some("stop"));

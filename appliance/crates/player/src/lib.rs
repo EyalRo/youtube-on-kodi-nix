@@ -129,7 +129,8 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
     }
     a.push(format!("--audio-device={}", cfg.audio_device));
     a.push(format!("--input-ipc-server={}", socket.display()));
-    a.push(format!("--script={}", pause_menu_path(socket).display()));
+    // `scripts`, not `script`: that is the option name libmpv knows (`--script` is a command-line alias).
+    a.push(format!("--scripts={}", pause_menu_path(socket).display()));
     a.extend(cfg.mpv_extra.iter().cloned());
     if play.resume_position > 0.0 {
         a.push(format!("--start={}", play.resume_position));
@@ -428,7 +429,7 @@ mod tests {
         );
         assert!(a.contains("--start=125.5") && a.contains("--input-ipc-server=/run/p.sock"));
         assert!(
-            a.contains("--osc=no") && a.contains("--script=/run/pausemenu.lua"),
+            a.contains("--osc=no") && a.contains("--scripts=/run/pausemenu.lua"),
             "the pause overlay script replaces the OSC"
         );
         assert!(a.ends_with("-- /media/movies/Alien.mkv"));
