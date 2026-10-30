@@ -28,11 +28,13 @@ local LANGS = {
 
 local CHANNELS = { [1] = "mono", [2] = "stereo", [6] = "5.1", [8] = "7.1" }
 
--- hidden | bar (after a seek) | paused | menu | list
+-- hidden | bar (after a seek) | paused | menu | list | confirm (really stop?)
 local mode = "hidden"
 local settings_focus = false
 local menu_cursor = 1
 local list_kind, list_items, list_cursor, list_top
+local confirm_cursor, confirm_was_playing
+local NO_CONFIRM_LAST = 60 -- seconds from the end where Back stops without asking
 local bar_timer
 
 local function esc(s)
@@ -204,6 +206,18 @@ local function draw_menu()
     text(x + 40, y + 440, 24, hint, "B0B0B0", 4)
 end
 
+local function draw_confirm()
+    local x, y, w = draw_panel("Stop playing?")
+    for i, label in ipairs({ "Keep watching", "Stop playback" }) do
+        local ry = y + 100 + (i - 1) * 80
+        if i == confirm_cursor then
+            rect(x + 20, ry - 8, w - 40, 64, ACCENT)
+        end
+        text(x + 40, ry + 24, 30, label, i == confirm_cursor and "000000" or "FFFFFF", 4)
+    end
+    text(x + 40, y + 440, 24, "OK choose    Back keep watching", "B0B0B0", 4)
+end
+
 local VISIBLE = 7
 
 local function draw_list()
@@ -237,6 +251,9 @@ local function render()
     elseif mode == "list" then
         draw_bar(true)
         draw_list()
+    elseif mode == "confirm" then
+        draw_bar(true)
+        draw_confirm()
     end
     mp.set_osd_ass(W, H, table.concat(ass, "\n"))
 end
@@ -327,6 +344,38 @@ local function list_key(name)
     render()
 end
 
+-- Back asks before stopping, so one press too many does not throw the movie away. Near the
+-- end there is nothing to lose.
+local function ask_to_stop()
+    local pos = mp.get_property_number("time-pos") or 0
+    local dur = mp.get_property_number("duration") or 0
+    if dur > 0 and dur - pos < NO_CONFIRM_LAST then
+        mp.commandv("quit")
+        return
+    end
+    confirm_cursor = 1
+    confirm_was_playing = not mp.get_property_native("pause")
+    mp.set_property_native("pause", true)
+    set_mode("confirm")
+end
+
+local function confirm_key(name)
+    if name == "up" or name == "down" or name == "left" or name == "right" then
+        confirm_cursor = 3 - confirm_cursor
+        render()
+        return
+    end
+    local keep = name == "back" or name == "playpause" or (name == "ok" and confirm_cursor == 1)
+    if keep then
+        set_mode("paused")
+        if confirm_was_playing then
+            mp.set_property_native("pause", false)
+        end
+    elseif name == "ok" then
+        mp.commandv("quit")
+    end
+end
+
 local function seek(secs)
     mp.commandv("seek", tostring(secs), "relative")
     if mode ~= "paused" then
@@ -336,8 +385,10 @@ end
 
 local function playback_key(name)
     local paused = mp.get_property_native("pause")
-    if name == "back" or name == "stop" then
+    if name == "stop" then
         mp.commandv("quit")
+    elseif name == "back" then
+        ask_to_stop()
     elseif name == "playpause" then
         mp.set_property_native("pause", not paused)
     elseif name == "ok" then
@@ -375,6 +426,8 @@ mp.register_script_message("key", function(name)
         menu_key(name)
     elseif mode == "list" then
         list_key(name)
+    elseif mode == "confirm" then
+        confirm_key(name)
     else
         playback_key(name)
     end
@@ -382,6 +435,9 @@ end)
 
 mp.observe_property("pause", "bool", function(_, paused)
     settings_focus = false
+    if paused and mode == "confirm" then
+        return -- the pause the dialog itself asked for
+    end
     set_mode(paused and "paused" or "hidden")
 end)
 
