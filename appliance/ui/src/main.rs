@@ -49,6 +49,18 @@ fn available_upgrade(path: &str, installed: &str) -> String {
     }
 }
 
+/// Read the update checker's and the installer's files into the UI: the newer version on offer,
+/// the version installed but waiting for a restart, and how the install is going.
+fn refresh_update_state(ui: &App, available_file: &str) {
+    let installed = env!("CARGO_PKG_VERSION");
+    ui.set_available(available_upgrade(available_file, installed).into());
+    let dir = Path::new(available_file).parent().unwrap_or(Path::new("."));
+    // `pending` holds the version the last install built; it counts only until that version runs.
+    ui.set_pending(available_upgrade(&dir.join("pending").to_string_lossy(), installed).into());
+    let state = std::fs::read_to_string(dir.join("upgrade-status")).unwrap_or_default();
+    ui.set_upgrade_state(state.trim().replace("done", "").into());
+}
+
 /// A bare HTTP/1.0 GET: mediad is on localhost and replies with a Content-Length.
 fn get(addr: &str, path: &str) -> Result<(u16, String, Vec<u8>), String> {
     let mut s = TcpStream::connect(addr).map_err(|e| format!("cannot reach mediad at {addr}: {e}"))?;
@@ -870,16 +882,55 @@ fn main() -> Result<(), slint::PlatformError> {
     // The update checker writes the newest published version to this file; the settings button
     // wears a badge while it is newer than ours. Polled, so it appears without a restart.
     let update_file = env_or("UI_UPDATE_FILE", "/var/lib/appliance/available-version");
-    ui.set_available(available_upgrade(&update_file, env!("CARGO_PKG_VERSION")).into());
+    ui.set_can_install(env_or("UI_CAN_INSTALL", "") == "1");
+    refresh_update_state(&ui, &update_file);
     let update_poll = slint::Timer::default();
     {
         let (weak, file) = (ui.as_weak(), update_file.clone());
-        update_poll.start(slint::TimerMode::Repeated, Duration::from_secs(60), move || {
+        update_poll.start(slint::TimerMode::Repeated, Duration::from_secs(3), move || {
             if let Some(ui) = weak.upgrade() {
-                ui.set_available(available_upgrade(&file, env!("CARGO_PKG_VERSION")).into());
+                refresh_update_state(&ui, &file);
             }
         });
     }
+    // "Check for updates": run the checker now (it fetches the newest version number), then re-read.
+    {
+        let (weak, file) = (ui.as_weak(), update_file.clone());
+        ui.on_check_update(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_check_msg("Checking…".into());
+            let (weak, file) = (weak.clone(), file.clone());
+            std::thread::spawn(move || {
+                let cmd = env_or("UI_SYNC_CMD", "systemctl");
+                let unit = env_or("UI_CHECK_UNIT", "appliance-update-check.service");
+                let ok = match Command::new(&cmd).args(["start", &unit]).status() {
+                    Ok(s) if s.success() => true,
+                    Ok(s) => {
+                        tracing::error!(%unit, status = %s, "version check refused; is the polkit rule for the UI user in place?");
+                        false
+                    }
+                    Err(e) => {
+                        tracing::error!(%unit, error = %e, "cannot run {cmd} to check for updates");
+                        false
+                    }
+                };
+                let _ = weak.upgrade_in_event_loop(move |ui| {
+                    refresh_update_state(&ui, &file);
+                    ui.set_check_msg(if ok { "".into() } else { "Could not check for updates".into() });
+                });
+            });
+        });
+    }
+    // "Install": the build runs as root in its own unit; the poll above follows its status file.
+    ui.on_install_update(|| {
+        let cmd = env_or("UI_SYNC_CMD", "systemctl");
+        let unit = env_or("UI_UPGRADE_UNIT", "appliance-upgrade.service");
+        match Command::new(&cmd).args(["start", "--no-block", &unit]).status() {
+            Ok(s) if s.success() => tracing::info!(%unit, "upgrade requested from the settings page"),
+            Ok(s) => tracing::error!(%unit, status = %s, "upgrade request refused; is the polkit rule for the UI user in place?"),
+            Err(e) => tracing::error!(%unit, error = %e, "cannot run {cmd} to start the upgrade"),
+        }
+    });
     // mediad may still be starting (or rescanning); show an empty UI rather than dying.
     // The rows of the last run are on disk: paint those at once (no network, no downloads) so the
     // screen is never blank while mediad answers, then replace them with the live ones.

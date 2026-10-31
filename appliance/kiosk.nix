@@ -7,6 +7,11 @@ let
   cfg = config.services.media-appliance.kiosk;
   backend = config.services.media-appliance;
   inherit (lib) mkEnableOption mkOption mkIf types;
+  # Units the UI user may start without a password (see the polkit rule below).
+  polkitUnits =
+    lib.optional backend.ytsync.enable "ytsync.service"
+    ++ lib.optional backend.updateCheck.enable "appliance-update-check.service"
+    ++ lib.optional (backend.updateCheck.enable && backend.updateCheck.install.flake != null) "appliance-upgrade.service";
 
   # The Plymouth theme: the logo centred on the UI's background colour.
   shmetflixTheme = pkgs.runCommand "plymouth-theme-shmetflix" { } ''
@@ -47,6 +52,7 @@ let
     UI_PLAY = "${backend.package}/bin/play";
     UI_MEDIAD = backend.bind;
     UI_UPDATE_FILE = backend.updateCheck.file;
+    UI_CAN_INSTALL = if backend.updateCheck.enable && backend.updateCheck.install.flake != null then "1" else "";
     PLAYER_MEDIAD = backend.bind;
     PLAYER_AUDIO_DEVICE = cfg.audioDevice;
     PLAYER_RETROARCH = "${cfg.retroarch}/bin/retroarch";
@@ -244,14 +250,15 @@ in
       };
     };
 
-    # The top bar's sync button starts the download job (`systemctl start --no-block ytsync.service`)
-    # as the UI user, which polkit refuses unless told otherwise. Only that one verb on that one unit.
-    security.polkit = mkIf backend.ytsync.enable {
+    # The top bar's sync button starts the download job (`systemctl start --no-block ytsync.service`),
+    # and the settings page starts the version check and the upgrade, as the UI user, which polkit
+    # refuses unless told otherwise. Only the start verb, only on those units.
+    security.polkit = mkIf (polkitUnits != [ ]) {
       enable = true;
       extraConfig = ''
         polkit.addRule(function(action, subject) {
           if (action.id == "org.freedesktop.systemd1.manage-units"
-              && action.lookup("unit") == "ytsync.service"
+              && ${builtins.toJSON polkitUnits}.indexOf(action.lookup("unit")) >= 0
               && action.lookup("verb") == "start"
               && subject.user == "${cfg.user}") {
             return polkit.Result.YES;

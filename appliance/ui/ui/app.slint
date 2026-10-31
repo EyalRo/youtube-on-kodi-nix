@@ -107,6 +107,36 @@ component Poster inherits Rectangle {
     }
 }
 
+// One entry of the settings page: gold-edged when selected, with a › when select does something.
+component SettingsRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    in property <bool> action: true;
+    x: 32px;
+    width: 496px;
+    height: 56px;
+    border-radius: 10px;
+    background: selected ? #243442 : #1b2733;
+    border-width: 2px;
+    border-color: selected ? #ffd54a : transparent;
+    Text {
+        x: 20px;
+        text: label;
+        font-size: 26px;
+        color: action ? white : #7d8892;
+        vertical-alignment: center;
+    }
+    if action: Text {
+        x: 440px;
+        width: 36px;
+        text: "›";
+        font-size: 30px;
+        color: #ffd54a;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+    }
+}
+
 // A line icon drawn from SVG path commands on a 24x24 grid (no icon font needed).
 component Glyph inherits Path {
     in property <color> tint: white;
@@ -193,6 +223,16 @@ export component App inherits Window {
     in property <string> version: "";
     // The newer version waiting to be installed; empty when the appliance is up to date.
     in property <string> available: "";
+    // The version installed as the next boot entry, waiting for a restart; empty when none.
+    in property <string> pending: "";
+    // Progress of the install: "", "running" or "failed". `can-install` is false when the box has no
+    // install recipe (services.media-appliance.updateCheck.install).
+    in property <string> upgrade-state: "";
+    in property <bool> can-install: false;
+    in-out property <string> check-msg: "";
+    in-out property <int> set-sel: 0;
+    callback check-update();
+    callback install-update();
     in-out property <bool> settings-open: false;
     // Settings pages: 0 the main page, 1 the Bluetooth controllers page.
     in-out property <int> settings-page: 0;
@@ -233,6 +273,9 @@ export component App inherits Window {
     background: #0e1318;
     forward-focus: fs;
     default-font-size: 22px;
+
+    // The install row of the settings page: only when the box can install and there is something to.
+    property <bool> show-install: can-install && (pending != "" || available != "");
 
     property <length> tile-w: 224px;
     property <length> row-h: 480px;
@@ -322,7 +365,13 @@ export component App inherits Window {
     // a level with Back/Escape.
     function settings-key(text: string) {
         if (settings-page == 0) {
-            if (text == Key.Return) { settings-page = 1; bt-sel = 0; bt-actions = false; bt-message = ""; bt-open(); }
+            if (text == Key.UpArrow) { if (set-sel > 0) { set-sel -= 1; moved(); } }
+            else if (text == Key.DownArrow) { if (set-sel < (show-install ? 2 : 1)) { set-sel += 1; moved(); } }
+            else if (text == Key.Return) {
+                if (set-sel == 0) { if (check-msg == "") { check-update(); } }
+                else if (show-install && set-sel == 1) { if (pending == "" && upgrade-state != "running") { install-update(); } }
+                else { settings-page = 1; bt-sel = 0; bt-actions = false; bt-message = ""; bt-open(); }
+            }
             else { settings-open = false; }
             return;
         }
@@ -361,6 +410,7 @@ export component App inherits Window {
         } else if (bar-sel == 1) {
             settings-open = true;
             settings-page = 0;
+            set-sel = 0;
             config();
         } else if (armed == bar-sel) {
             armed = -1;
@@ -513,7 +563,7 @@ export component App inherits Window {
             }
             BarButton {
                 focused: on-bar && bar-sel == 1;
-                badge: available != "";
+                badge: available != "" || pending != "";
                 // sliders
                 commands: "M4 7 H6 M10 7 H20 M8 7 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M4 12 H14 M18 12 H20 M16 12 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M4 17 H8 M12 17 H20 M10 17 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0";
             }
@@ -825,9 +875,9 @@ export component App inherits Window {
         background: #00000080;
         if settings-page == 0: Rectangle {
             x: (root.width - 560px) / 2;
-            y: (root.height - 340px) / 2;
+            y: (root.height - 480px) / 2;
             width: 560px;
-            height: 340px;
+            height: 480px;
             border-radius: 20px;
             background: #16202a;
             border-width: 2px;
@@ -853,41 +903,43 @@ export component App inherits Window {
                 x: 32px;
                 y: 128px;
                 width: 496px;
-                text: available != "" ? "Upgrade available: " + available : "Up to date";
+                text: pending != "" ? "Version " + pending + " installed: restart to use it"
+                    : available != "" ? "Upgrade available: " + available : "Up to date";
                 font-size: 26px;
-                color: available != "" ? #e50914 : #7d8892;
-            }
-            Rectangle {
-                x: 32px;
-                y: 200px;
-                width: 496px;
-                height: 56px;
-                border-radius: 10px;
-                background: #243442;
-                border-width: 2px;
-                border-color: #ffd54a;
-                Text {
-                    x: 20px;
-                    text: "Controllers";
-                    font-size: 26px;
-                    color: white;
-                    vertical-alignment: center;
-                }
-                Text {
-                    x: 440px;
-                    width: 36px;
-                    text: "›";
-                    font-size: 30px;
-                    color: #ffd54a;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
+                color: pending != "" || available != "" ? #e50914 : #7d8892;
             }
             Text {
                 x: 32px;
-                y: 288px;
+                y: 170px;
                 width: 496px;
-                text: "select: controllers · any other button closes";
+                text: check-msg != "" ? check-msg
+                    : upgrade-state == "running" ? "Installing: this takes a few minutes"
+                    : upgrade-state == "failed" ? "The install failed" : "";
+                font-size: 20px;
+                color: upgrade-state == "failed" && check-msg == "" ? #e50914 : #aab4bd;
+            }
+            SettingsRow {
+                y: 220px;
+                label: "Check for updates";
+                selected: set-sel == 0;
+            }
+            if show-install: SettingsRow {
+                y: 286px;
+                label: pending != "" ? "Restart to finish " + pending
+                    : upgrade-state == "running" ? "Installing " + available + "…" : "Install " + available;
+                selected: set-sel == 1;
+                action: pending == "" && upgrade-state != "running";
+            }
+            SettingsRow {
+                y: show-install ? 352px : 286px;
+                label: "Controllers";
+                selected: set-sel == (show-install ? 2 : 1);
+            }
+            Text {
+                x: 32px;
+                y: 428px;
+                width: 496px;
+                text: "up/down and select · any other button closes";
                 font-size: 18px;
                 color: #7d8892;
                 horizontal-alignment: center;

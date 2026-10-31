@@ -95,6 +95,32 @@ in
         defaultText = lib.literalExpression ''if the package is a debug build then "*:0/5" else "*-*-* 04:30:00"'';
         description = "systemd OnCalendar expression. Every 5 minutes on a debug build, daily otherwise.";
       };
+
+      install = {
+        flake = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "git+http://host:3000/me/nixos#nuc14";
+          description = ''
+            The flake of this machine's own configuration. When set, the settings page offers to install
+            a newer version: `appliance-upgrade.service` runs `nixos-rebuild boot` on it (the new
+            system boots next time; nothing restarts). Null disables installing from the UI.
+          '';
+        };
+
+        overrideInputs = mkOption {
+          type = types.attrsOf types.str;
+          default = { };
+          example = {
+            appliance-bin = "https://github.com/EyalRo/youtube-on-kodi-nix/releases/download/latest/appliance-x86_64-linux.tar.gz";
+            youtube-on-kodi = "github:EyalRo/youtube-on-kodi-nix";
+          };
+          description = ''
+            Flake inputs of `install.flake` to re-fetch (`--override-input name url`) instead of using
+            the pinned flake.lock, so the build gets the new release without committing a lock update.
+          '';
+        };
+      };
     };
 
     artsync = {
@@ -334,6 +360,35 @@ in
         OnCalendar = cfg.updateCheck.schedule;
         Persistent = true;
         RandomizedDelaySec = if debugBuild then "0" else "30m";
+      };
+    };
+
+    # Started from the settings page (polkit rule in kiosk.nix). Builds the new system as the next
+    # boot entry. `upgrade-status` is running/done/failed for the UI; `pending` names the version
+    # waiting for a reboot (the UI shows it until it is the version that runs).
+    systemd.services.appliance-upgrade = mkIf (cfg.updateCheck.enable && cfg.updateCheck.install.flake != null) {
+      description = "Install the newest appliance version as the next boot entry";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      path = [ config.nix.package pkgs.nixos-rebuild pkgs.git pkgs.openssh pkgs.coreutils ];
+      environment.HOME = "/root";
+      script = ''
+        dir=$(dirname ${cfg.updateCheck.file})
+        mkdir -p "$dir"
+        want=$(head -n1 ${cfg.updateCheck.file} | tr -d ' \r')
+        echo running > "$dir/upgrade-status"
+        if nixos-rebuild boot --refresh --flake ${lib.escapeShellArg cfg.updateCheck.install.flake} \
+            ${lib.concatStringsSep " " (lib.mapAttrsToList (n: u: "--override-input ${lib.escapeShellArg n} ${lib.escapeShellArg u}") cfg.updateCheck.install.overrideInputs)}; then
+          printf '%s\n' "$want" > "$dir/pending"
+          echo done > "$dir/upgrade-status"
+        else
+          echo failed > "$dir/upgrade-status"
+          exit 1
+        fi
+      '';
+      serviceConfig = {
+        Type = "oneshot";
+        TimeoutStartSec = "1h";
       };
     };
 
