@@ -14,6 +14,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use store::{Store, StoreError};
 
+pub mod sysstats;
+
 #[derive(Clone)]
 pub struct AppState {
     store: Arc<Mutex<Store>>,

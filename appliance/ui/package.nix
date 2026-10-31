@@ -5,7 +5,7 @@
 
 rustPlatform.buildRustPackage {
   pname = "appliance-ui";
-  version = "0.5.8";
+  version = "0.5.9";
 
   src = lib.fileset.toSource {
     root = ../.;

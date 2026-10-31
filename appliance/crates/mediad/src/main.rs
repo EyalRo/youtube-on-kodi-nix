@@ -1,12 +1,22 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use mediad::{AppState, router};
+use mediad::{AppState, router, sysstats};
 use scanner::ReleaseDb;
 use store::Store;
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
+}
+
+fn secs_env(name: &str, default: u64) -> u64 {
+    match env_or(name, &default.to_string()).parse() {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::error!(error = %e, "{name} must be a number of seconds");
+            std::process::exit(2);
+        }
+    }
 }
 
 #[tokio::main]
@@ -47,6 +57,12 @@ async fn main() {
         && !dir.is_empty()
     {
         state = state.with_art_cache(PathBuf::from(dir));
+    }
+
+    let stats_secs = secs_env("MEDIAD_STATS_SECS", 30);
+    if stats_secs > 0 {
+        let busy = secs_env("MEDIAD_STATS_BUSY_SECS", 2).max(1);
+        tokio::spawn(sysstats::run(Duration::from_secs(stats_secs), Duration::from_secs(busy)));
     }
 
     if rescan_secs > 0 {
