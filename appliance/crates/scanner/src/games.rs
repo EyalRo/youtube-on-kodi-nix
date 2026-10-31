@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use catalog::{
-    DateSource, Kind, MediaEntry, display_title, tosec, parse_release, system_for, system_for_folder,
+    DateSource, Kind, MediaEntry, display_title, neogeo_title, neogeo_year, parse_release, system_for,
+    system_for_folder, tosec,
 };
 use chrono::NaiveDate;
 use walkdir::WalkDir;
@@ -29,6 +30,26 @@ fn sidecar_date(rom: &Path) -> Option<NaiveDate> {
         return Some(d);
     }
     nfo_tag(&rom.with_extension("nfo"), &["releasedate"]).and_then(|v| parse_release(&v))
+}
+
+/// Archive.org names DOS games `Digger_1983.zip`: the year is a suffix, the words are joined by underscores.
+fn dos_split(stem: &str) -> (String, Option<i32>) {
+    let words = stem.replace('_', " ");
+    let words = words.trim();
+    match words.rsplit_once(' ') {
+        Some((title, y)) if y.len() == 4 && (y.starts_with('1') || y.starts_with('2')) && y.bytes().all(|b| b.is_ascii_digit()) => {
+            (title.trim().to_string(), y.parse().ok())
+        }
+        _ => (words.to_string(), None),
+    }
+}
+
+fn dos_title(stem: &str) -> String {
+    dos_split(stem).0
+}
+
+fn dos_year(stem: &str) -> Option<i32> {
+    dos_split(stem).1
 }
 
 pub fn scan(media_root: &Path, db: &ReleaseDb) -> Scan {
@@ -80,6 +101,10 @@ pub fn scan(media_root: &Path, db: &ReleaseDb) -> Scan {
             (Some(d), DateSource::Database)
         } else if let Some((_, Some(d))) = tosec(&file_name(path)) {
             (Some(d), DateSource::Filename)
+        } else if let Some(d) = dos_year(&stem).and_then(|y| NaiveDate::from_ymd_opt(y, 1, 1)).filter(|_| system.id == "dos") {
+            (Some(d), DateSource::Filename)
+        } else if let Some(d) = (system.id == "neogeo").then(|| neogeo_year(&stem)).flatten().and_then(|y| NaiveDate::from_ymd_opt(y, 1, 1)) {
+            (Some(d), DateSource::Database)
         } else {
             undated += 1;
             (None, DateSource::None)
@@ -87,7 +112,12 @@ pub fn scan(media_root: &Path, db: &ReleaseDb) -> Scan {
         scan.entries.push(MediaEntry {
             id: ids::make("g", media_root, path),
             kind: Kind::Game,
-            title: display_title(&file_name(path)),
+            title: match system.id {
+                "neogeo" => neogeo_title(&stem),
+                "dos" => Some(dos_title(&stem)),
+                _ => None,
+            }
+            .unwrap_or_else(|| display_title(&file_name(path))),
             date,
             date_source: source,
             path: path.to_path_buf(),
@@ -174,5 +204,34 @@ mod tests {
         assert_eq!(by("Comix Zone").date_source, DateSource::None);
         assert_eq!(s.warnings.len(), 1, "one summary, not one warning per game");
         assert!(s.warnings[0].starts_with("3 game(s)"));
+    }
+
+    #[test]
+    fn neo_geo_sets_get_their_real_names_and_years() {
+        let m = tempfile::tempdir().unwrap();
+        let dir = m.path().join("roms/neogeo");
+        create_dir_all(&dir).unwrap();
+        write(dir.join("mslug.zip"), b"r").unwrap();
+        write(dir.join("neogeo.zip"), b"bios").unwrap();
+        write(dir.join("unknownset.zip"), b"r").unwrap();
+        let s = scan(m.path(), &ReleaseDb::empty());
+        let by = |t: &str| s.entries.iter().find(|e| e.title == t);
+        let slug = by("Metal Slug - Super Vehicle-001").expect("mslug is named");
+        assert_eq!((slug.date, slug.date_source), (NaiveDate::from_ymd_opt(1996, 1, 1), DateSource::Database));
+        assert!(by("unknownset").is_some(), "an unknown set keeps its file name");
+        assert_eq!(s.entries.len(), 2, "the BIOS is not a game");
+    }
+
+    #[test]
+    fn dos_zips_from_the_archive_get_a_title_and_year() {
+        let m = tempfile::tempdir().unwrap();
+        let dir = m.path().join("roms/dos");
+        create_dir_all(&dir).unwrap();
+        write(dir.join("Digger_1983.zip"), b"r").unwrap();
+        let s = scan(m.path(), &ReleaseDb::empty());
+        assert_eq!(s.entries.len(), 1);
+        let e = &s.entries[0];
+        assert_eq!((e.title.as_str(), e.system.as_deref()), ("Digger", Some("dos")));
+        assert_eq!(e.date, NaiveDate::from_ymd_opt(1983, 1, 1));
     }
 }

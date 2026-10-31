@@ -5,10 +5,12 @@
 
 mod date;
 mod item;
+mod neogeo;
 mod rows;
 mod systems;
 
 pub use date::parse_release;
+pub use neogeo::{neogeo_full_name, neogeo_title, neogeo_year};
 pub use item::{DateSource, Episode, Item, Kind, MediaEntry};
 pub use rows::{FIXED_ROW_IDS, RowInfo, build_row, list_rows, sort_newest};
 pub use systems::{

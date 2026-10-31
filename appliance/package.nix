@@ -5,7 +5,7 @@
 
 rustPlatform.buildRustPackage {
   pname = "media-appliance";
-version = "0.5.10";
+version = "0.5.11";
 
   src = lib.fileset.toSource {
     root = ./.;

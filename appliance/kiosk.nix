@@ -147,6 +147,7 @@ in
         cores.mgba
         cores.mupen64plus
         cores.fbneo
+        cores.dosbox-pure
       ]);
       description = "RetroArch package (with libretro cores) used for game playback.";
     };

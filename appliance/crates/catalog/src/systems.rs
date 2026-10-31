@@ -96,6 +96,15 @@ pub const SYSTEMS: &[System] = &[
         playable: true,
     },
     System {
+        id: "dos",
+        name: "DOS",
+        exts: &["dosz"],
+        // DOS Pure plays a zipped game folder as it is; a zip is too ambiguous outside a DOS folder.
+        folder_exts: &["zip"],
+        aliases: &["dos", "msdos", "pc"],
+        playable: true,
+    },
+    System {
         id: "neogeo",
         name: "Neo Geo",
         exts: &[],

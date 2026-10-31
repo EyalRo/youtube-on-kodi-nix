@@ -106,6 +106,7 @@ pub fn libretro_dir(system: &str) -> Option<&'static str> {
         "gba" => "Nintendo - Game Boy Advance",
         "n64" => "Nintendo - Nintendo 64",
         "neogeo" => "SNK - Neo Geo",
+        "dos" => "DOS",
         _ => return None,
     })
 }
@@ -445,7 +446,9 @@ fn lookup_libretro(listings: &mut std::collections::HashMap<String, Vec<String>>
         let page = fetch(&format!("https://thumbnails.libretro.com/{}/Named_Boxarts/", percent_encode(dir)), None)?;
         listings.insert(dir.to_string(), parse_listing(&String::from_utf8_lossy(&page)));
     }
-    let Some(name) = best_thumbnail(&listings[dir], &item.title) else { return Ok(Found::Nothing) };
+    // Neo Geo covers are named by the full FinalBurn Neo description, not the shortened title.
+    let want = if item.system.as_deref() == Some("neogeo") { catalog::neogeo_full_name(&item.title).unwrap_or(&item.title) } else { &item.title };
+    let Some(name) = best_thumbnail(&listings[dir], want) else { return Ok(Found::Nothing) };
     let img = fetch(
         &format!("https://thumbnails.libretro.com/{}/Named_Boxarts/{}", percent_encode(dir), percent_encode(&name)),
         None,

@@ -89,6 +89,7 @@ pub fn core_for(system: &str) -> Option<&'static str> {
         "gb" | "gbc" | "gba" => "mgba",
         "n64" => "mupen64plus_next",
         "neogeo" => "fbneo",
+        "dos" => "dosbox_pure",
         _ => return None,
     })
 }
