@@ -155,6 +155,9 @@ pub fn mpv_args(cfg: &Config, play: &Play, socket: &Path) -> Vec<String> {
 const RETROARCH_OVERRIDES: &str =
     "video_driver = \"drm\"\nvideo_fullscreen = \"true\"\nui_companion_start_on_boot = \"false\"\ndesktop_menu_enable = \"false\"\n";
 
+/// Gain applied to NES games, in dB.
+const NES_VOLUME_DB: f32 = -9.0;
+
 /// The overrides plus audio: the same ALSA device mpv plays through (the TV's HDMI). Without
 /// them RetroArch picks its own default driver and device, and the game runs silent. The 48 kHz
 /// rate matches the HDMI sink, and the 128 ms buffer (default 64) rides out frame-time hitches
@@ -173,6 +176,11 @@ pub fn retroarch_overrides(cfg: &Config, system: Option<&str>) -> String {
         out.push_str(&format!("joypad_autoconfig_dir = \"{}\"\n", dir.display()));
     }
     out.push_str(&format!("audio_driver = \"alsa\"\naudio_device = \"{device}\"\naudio_enable = \"true\"\naudio_mute_enable = \"false\"\naudio_out_rate = \"48000\"\naudio_latency = \"128\"\naudio_sync = \"true\"\nvideo_vsync = \"true\"\n"));
+    // The NES core outputs its square waves at full scale, which over HDMI is far louder than a
+    // video or the other systems; RetroArch's volume gain is in dB.
+    if system == Some("nes") {
+        out.push_str(&format!("audio_volume = \"{NES_VOLUME_DB:.1}\"\n"));
+    }
     // Some pads can put their D-pad on the left stick (the 8BitDo M30 does, by a button chord), where
     // RetroArch's profile expects a D-pad hat and ignores it. For digital-only systems let the left
     // stick act as the D-pad, so such a pad still works. Not for N64: there the stick is a real analog.
@@ -480,6 +488,14 @@ mod tests {
     fn retroarch_plays_through_the_tv_audio_device() {
         let o = retroarch_overrides(&cfg(), Some("genesis"));
         assert!(o.contains("audio_driver = \"alsa\"") && o.contains("audio_device = \"hdmi:CARD=PCH,DEV=0\""), "{o}");
+    }
+
+    #[test]
+    fn only_nes_games_are_turned_down() {
+        assert!(retroarch_overrides(&cfg(), Some("nes")).contains("audio_volume = \"-9.0\""));
+        for system in ["mastersystem", "genesis", "snes", "neogeo", "n64"] {
+            assert!(!retroarch_overrides(&cfg(), Some(system)).contains("audio_volume"), "{system}");
+        }
     }
 
     #[test]
