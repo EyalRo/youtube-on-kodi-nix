@@ -102,6 +102,13 @@ fn copy_atomic(from: &Path, to: &Path) -> io::Result<()> {
     result
 }
 
+/// The id yt-dlp puts last in a file name: `Title [id]` -> `id`.
+fn id_in_stem(stem: &str) -> Option<String> {
+    let inner = stem.trim_end().strip_suffix(']')?;
+    let id = &inner[inner.rfind('[')? + 1..];
+    (!id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')).then(|| id.to_string())
+}
+
 /// Deliver every complete download in `work` to `<youtube_root>/<channel>/`.
 /// `fallback_channel` names the folder when the info.json has no channel.
 pub fn deliver(work: &Path, youtube_root: &Path, fallback_channel: Option<&str>) -> Outcome {
@@ -128,11 +135,14 @@ pub fn deliver(work: &Path, youtube_root: &Path, fallback_channel: Option<&str>)
         let info: Option<serde_json::Value> = fs::read_to_string(&info_path)
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok());
+        // An unreadable sidecar still has the id in the file name (`... [id].info.json`), which is
+        // what lets the caller take the video back out of the download archive.
         let id = info
             .as_ref()
             .and_then(|i| i.get("id"))
             .and_then(|v| v.as_str())
-            .map(str::to_string);
+            .map(str::to_string)
+            .or_else(|| id_in_stem(&stem));
         let Some(info) = info else {
             outcome.failed.push(Failed {
                 id,
@@ -223,6 +233,19 @@ mod tests {
 
     fn put(dir: &Path, name: &str, body: &str) {
         fs::write(dir.join(name), body).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_sidecar_still_names_its_video() {
+        assert_eq!(id_in_stem("2026-10-31 - Title [HrKYJ1zN8MA]").as_deref(), Some("HrKYJ1zN8MA"));
+        assert_eq!(id_in_stem("Odd [name] [a-B_9]").as_deref(), Some("a-B_9"));
+        assert_eq!(id_in_stem("no id here"), None);
+        let work = tempfile::tempdir().unwrap();
+        let lib = tempfile::tempdir().unwrap();
+        put(work.path(), "2024-05-01 - Hi [abc].info.json", "{ broken");
+        let out = deliver(work.path(), lib.path(), None);
+        assert_eq!(out.failed.len(), 1);
+        assert_eq!(out.failed[0].id.as_deref(), Some("abc"), "so the caller can take it back out of the archive");
     }
 
     #[test]

@@ -220,6 +220,31 @@ pub fn run(cfg: &Config, channels: &[Channel], fetcher: &dyn Fetch) -> Summary {
         summary.failed_channels = channels.len();
         return summary;
     }
+    // Every run clears and reuses one work directory, so two runs at once (a manual backfill while the
+    // timer fires, or the sync button during a download) would delete each other's downloads after
+    // the archive already counted them as done. The second run steps aside.
+    let _lock = match fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(cfg.state_dir.join("ytsync.lock"))
+    {
+        Ok(f) => match f.try_lock() {
+            Ok(()) => Some(f),
+            Err(fs::TryLockError::WouldBlock) => {
+                tracing::warn!("another ytsync run is in progress; not starting a second one");
+                return summary;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot lock the state directory; continuing without");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "cannot open the lock file; continuing without");
+            None
+        }
+    };
     // An unmounted share would make every delivery land on the local disk underneath it.
     if !cfg.media_root.is_dir() {
         tracing::error!(media_root = %cfg.media_root.display(), "media root is missing; is /media mounted?");
@@ -298,6 +323,20 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::net::TcpListener;
+
+    #[test]
+    fn a_second_run_steps_aside_while_one_is_in_progress() {
+        let state = tempfile::tempdir().unwrap();
+        let media = tempfile::tempdir().unwrap();
+        let cfg = cfg(media.path(), state.path());
+        let holder = fs::File::create(state.path().join("ytsync.lock")).unwrap();
+        holder.try_lock().unwrap();
+        let channels = vec![Channel { url: "https://example.test//videos".into(), name: None }];
+        let fake = Fake { ids: vec!["x"], fail: false, seen: RefCell::new(Vec::new()) };
+        let sum = run(&cfg, &channels, &fake);
+        assert_eq!((sum.channels, sum.failed_channels), (0, 0));
+        assert!(fake.seen.borrow().is_empty(), "nothing was fetched");
+    }
 
     /// Writes one finished video per scripted id into the work directory.
     struct Fake {
