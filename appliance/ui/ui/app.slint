@@ -259,10 +259,9 @@ export component App inherits Window {
     callback bt-forget(int);
     // Debug builds log every remote button the UI receives (the text of the key event).
     callback key-debug(string);
-    // sel-row == -1 puts the focus on the top bar; bar-sel picks the button (0 sync, 1 settings,
-    // 2 reboot, 3 shutdown). Reboot and shutdown need a second select ("armed") within 3 s. The bar
-    // opens on settings, as it did before the sync button was added to its left.
-    in-out property <int> bar-sel: 1;
+    // sel-row == -1 puts the focus on the top bar; bar-sel picks the button (0 settings, 1 reboot,
+    // 2 shutdown). Reboot and shutdown need a second select ("armed") within 3 s.
+    in-out property <int> bar-sel: 0;
     property <int> armed: -1;
     property <string> notice;
     // True from choosing a video until the display is handed over: a full-screen spinner that
@@ -366,10 +365,16 @@ export component App inherits Window {
     function settings-key(text: string) {
         if (settings-page == 0) {
             if (text == Key.UpArrow) { if (set-sel > 0) { set-sel -= 1; moved(); } }
-            else if (text == Key.DownArrow) { if (set-sel < (show-install ? 2 : 1)) { set-sel += 1; moved(); } }
+            else if (text == Key.DownArrow) { if (set-sel < (show-install ? 3 : 2)) { set-sel += 1; moved(); } }
             else if (text == Key.Return) {
-                if (set-sel == 0) { if (check-msg == "") { check-update(); } }
-                else if (show-install && set-sel == 1) { if (pending == "" && upgrade-state != "running") { install-update(); } }
+                if (set-sel == 0) {
+                    settings-open = false;
+                    sync();
+                    notice = "Checking for new videos…";
+                    notice-timer.running = true;
+                }
+                else if (set-sel == 1) { if (check-msg == "") { check-update(); } }
+                else if (show-install && set-sel == 2) { if (pending == "" && upgrade-state != "running") { install-update(); } }
                 else { settings-page = 1; bt-sel = 0; bt-actions = false; bt-message = ""; bt-open(); }
             }
             else { settings-open = false; }
@@ -394,30 +399,26 @@ export component App inherits Window {
     }
 
     function disarm-power(why: string) {
-        if (armed >= 0) { disarm(armed == 2 ? "reboot" : "poweroff", why); }
+        if (armed >= 0) { disarm(armed == 1 ? "reboot" : "poweroff", why); }
         armed = -1;
     }
 
     function bar-move(step: int) {
-        if (bar-sel + step >= 0 && bar-sel + step <= 3) { bar-sel += step; moved(); }
+        if (bar-sel + step >= 0 && bar-sel + step <= 2) { bar-sel += step; moved(); }
     }
 
     function bar-activate() {
         if (bar-sel == 0) {
-            sync();
-            notice = "Checking for new videos…";
-            notice-timer.running = true;
-        } else if (bar-sel == 1) {
             settings-open = true;
             settings-page = 0;
             set-sel = 0;
             config();
         } else if (armed == bar-sel) {
             armed = -1;
-            power(bar-sel == 2 ? "reboot" : "poweroff");
+            power(bar-sel == 1 ? "reboot" : "poweroff");
         } else {
             armed = bar-sel;
-            arm(bar-sel == 2 ? "reboot" : "poweroff");
+            arm(bar-sel == 1 ? "reboot" : "poweroff");
             arm-timer.running = true;
         }
     }
@@ -501,7 +502,7 @@ export component App inherits Window {
         running: false;
         interval: 3s;
         triggered => {
-            if (armed >= 0) { disarm(armed == 2 ? "reboot" : "poweroff", "timeout"); }
+            if (armed >= 0) { disarm(armed == 1 ? "reboot" : "poweroff", "timeout"); }
             armed = -1;
             self.running = false;
         }
@@ -551,31 +552,26 @@ export component App inherits Window {
             height: parent.height;
         }
         HorizontalLayout {
-            x: root.width - 288px - 60px;
+            x: root.width - 212px - 60px;
             y: 10px;
-            width: 288px;
+            width: 212px;
             height: 60px;
             spacing: 16px;
             BarButton {
                 focused: on-bar && bar-sel == 0;
-                // cloud with a down arrow: fetch new videos now
-                commands: "M7 18 A4 4 0 0 1 6.5 10.1 A5.5 5.5 0 0 1 17.3 9 A4.5 4.5 0 0 1 17 18 H7 M12 11 V17 M9.5 14.5 L12 17 L14.5 14.5";
-            }
-            BarButton {
-                focused: on-bar && bar-sel == 1;
                 badge: available != "" || pending != "";
                 // sliders
                 commands: "M4 7 H6 M10 7 H20 M8 7 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M4 12 H14 M18 12 H20 M16 12 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M4 17 H8 M12 17 H20 M10 17 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0";
             }
             BarButton {
-                focused: on-bar && bar-sel == 2;
-                armed: armed == 2;
+                focused: on-bar && bar-sel == 1;
+                armed: armed == 1;
                 // circular arrow
                 commands: "M20 12 A8 8 0 1 1 17.66 6.34 M20 3.5 V8.5 H15";
             }
             BarButton {
-                focused: on-bar && bar-sel == 3;
-                armed: armed == 3;
+                focused: on-bar && bar-sel == 2;
+                armed: armed == 2;
                 // power
                 commands: "M12 3 V12 M7.2 6.2 A8 8 0 1 0 16.8 6.2";
             }
@@ -875,9 +871,9 @@ export component App inherits Window {
         background: #00000080;
         if settings-page == 0: Rectangle {
             x: (root.width - 560px) / 2;
-            y: (root.height - 480px) / 2;
+            y: (root.height - 560px) / 2;
             width: 560px;
-            height: 480px;
+            height: 560px;
             border-radius: 20px;
             background: #16202a;
             border-width: 2px;
@@ -920,24 +916,29 @@ export component App inherits Window {
             }
             SettingsRow {
                 y: 220px;
-                label: "Check for updates";
+                label: "Refresh library";
                 selected: set-sel == 0;
             }
-            if show-install: SettingsRow {
+            SettingsRow {
                 y: 286px;
+                label: "Check for updates";
+                selected: set-sel == 1;
+            }
+            if show-install: SettingsRow {
+                y: 352px;
                 label: pending != "" ? "Restart to finish " + pending
                     : upgrade-state == "running" ? "Installing " + available + "…" : "Install " + available;
-                selected: set-sel == 1;
+                selected: set-sel == 2;
                 action: pending == "" && upgrade-state != "running";
             }
             SettingsRow {
-                y: show-install ? 352px : 286px;
+                y: show-install ? 418px : 352px;
                 label: "Controllers";
-                selected: set-sel == (show-install ? 2 : 1);
+                selected: set-sel == (show-install ? 3 : 2);
             }
             Text {
                 x: 32px;
-                y: 428px;
+                y: show-install ? 494px : 428px;
                 width: 496px;
                 text: "up/down and select · any other button closes";
                 font-size: 18px;

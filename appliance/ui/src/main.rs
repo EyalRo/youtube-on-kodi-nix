@@ -594,6 +594,9 @@ fn tick_player() -> Option<impl FnMut()> {
         let mut pcm: Option<alsa::PCM> = None;
         let mut warned = false;
         for () in rx {
+            if playing() {
+                continue;
+            }
             if pcm.is_none() {
                 match open_tick_pcm(&device) {
                     Ok(p) => pcm = Some(p),
@@ -608,11 +611,11 @@ fn tick_player() -> Option<impl FnMut()> {
             let Some(p) = pcm.as_ref() else { continue };
             let played = p.io_i16().and_then(|io| io.writei(&samples)).and_then(|_| p.drain());
             if let Err(e) = played {
-                // Underrun or a vanished device: try to recover, else reopen on the next tick.
-                if p.try_recover(e, true).is_err() {
-                    pcm = None;
-                }
+                let _ = p.try_recover(e, true);
             }
+            // Closed after every tick: "default" is the TV's HDMI device itself, which only one
+            // client can open, so holding it would lock the player out of its audio.
+            pcm = None;
         }
     });
     Some(move || {
