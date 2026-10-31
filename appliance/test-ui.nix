@@ -157,7 +157,7 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds("journalctl -u ui.service --no-pager -o cat | grep -q 'settings opened'", timeout=30)
         machine.sleep(1)
         machine.screenshot("ui-8-settings")
-        assert "\"version\":\"0.5.2\"" in ui_log(), ui_log()
+        assert "\"version\":\"0.5.3\"" in ui_log(), ui_log()
 
     with subtest("a restarted UI paints from the cached rows, and the splash covers the console"):
         ui_unit("exit")

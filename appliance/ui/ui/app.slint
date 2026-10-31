@@ -21,7 +21,10 @@ export struct TileData {
 }
 
 export struct RowData {
+    id: string,
     label: string,
+    /// The column last selected in this row, restored when the focus comes back to it.
+    col: int,
     tiles: [TileData],
 }
 
@@ -147,10 +150,18 @@ component BarButton inherits Rectangle {
 }
 
 export component App inherits Window {
-    in property <[RowData]> rows;
+    in-out property <[RowData]> rows;
     in-out property <int> sel-row: 0;
     in-out property <int> sel-col: 0;
     callback activate(int, int);
+    // Home: every row goes back to its first tile.
+    callback home-reset();
+    // "Show all": the full list of one row, as an overlay.
+    in-out property <bool> all-open: false;
+    in property <string> all-title;
+    in property <[TileData]> all-items;
+    in-out property <int> sel-all: 0;
+    callback all-activate(int);
     callback quit();
     callback moved();
     callback power(string);
@@ -226,8 +237,13 @@ export component App inherits Window {
     property <length> tile-w: 224px;
     property <length> row-h: 480px;
 
-    function clamp-col() {
-        sel-col = max(0, min(sel-col, rows[sel-row].tiles.length - 1));
+    // Moves to row `n` (-1 is the top bar). Each row remembers its column, so it shows the same
+    // scroll position when the focus comes back to it.
+    function goto-row(n: int) {
+        if (sel-row >= 0) { rows[sel-row].col = sel-col; }
+        sel-row = n;
+        if (n >= 0) { sel-col = max(0, min(rows[n].col, rows[n].tiles.length - 1)); }
+        moved();
     }
 
     // True while the top bar (settings, reboot, shutdown) has the focus, on either screen.
@@ -237,6 +253,7 @@ export component App inherits Window {
     // returns to the page below it. On the show list there is nowhere further up.
     public function go-back() {
         disarm-power("button");
+        if (all-open) { all-open = false; return; }
         if (settings-open) {
             if (bt-actions) { bt-actions = false; }
             else if (settings-page == 1) { leave-controllers(); }
@@ -249,13 +266,15 @@ export component App inherits Window {
             else if (detail-focus < 0) { detail-focus = 0; moved(); }
             else { back(); moved(); }
         } else if (sel-row < 0) {
-            if (rows.length > 0) { sel-row = 0; clamp-col(); moved(); }
+            if (rows.length > 0) { goto-row(0); }
         }
     }
 
-    // Home goes to the top of the tree: out of any show page, onto the first row.
+    // Home goes to the top of the tree: out of any show page, onto the first row, every row
+    // scrolled back to its start.
     public function go-home() {
         disarm-power("button");
+        all-open = false;
         if (settings-open) {
             if (settings-page == 1) { leave-controllers(); }
             settings-open = false;
@@ -263,6 +282,7 @@ export component App inherits Window {
         }
         if (menu-open) { menu-close(); return; }
         if (detail) { back(); }
+        home-reset();
         sel-row = rows.length > 0 ? 0 : -1;
         sel-col = 0;
         moved();
@@ -356,6 +376,16 @@ export component App inherits Window {
         key-pressed(e) => {
             key-debug(e.text);
             if (loading) { return accept; }
+            if (all-open) {
+                if (e.text == Key.Home) { go-home(); }
+                else if (e.text == Key.Backspace || e.text == Key.Escape) { go-back(); }
+                else if (e.text == Key.UpArrow) { if (sel-all > 0) { sel-all -= 1; moved(); } }
+                else if (e.text == Key.DownArrow) { if (sel-all < all-items.length - 1) { sel-all += 1; moved(); } }
+                else if (e.text == Key.LeftArrow) { if (sel-all > 0) { sel-all = max(0, sel-all - 10); moved(); } }
+                else if (e.text == Key.RightArrow) { if (sel-all < all-items.length - 1) { sel-all = min(all-items.length - 1, sel-all + 10); moved(); } }
+                else if (e.text == Key.Return) { all-activate(sel-all); }
+                return accept;
+            }
             if (settings-open) { settings-key(e.text); return accept; }
             // Reboot and shutdown need a second select; any other button cancels.
             if (e.text != Key.Return && armed >= 0) { disarm-power("button"); }
@@ -402,10 +432,10 @@ export component App inherits Window {
                 else if (sel-col > 0) { sel-col -= 1; moved(); }
             } else if (e.text == Key.DownArrow) {
                 if (sel-row < 0) {
-                    if (rows.length > 0) { sel-row = 0; clamp-col(); moved(); }
-                } else if (sel-row < rows.length - 1) { sel-row += 1; clamp-col(); moved(); }
+                    if (rows.length > 0) { goto-row(0); }
+                } else if (sel-row < rows.length - 1) { goto-row(sel-row + 1); }
             } else if (e.text == Key.UpArrow) {
-                if (sel-row >= 0) { sel-row -= 1; moved(); }
+                if (sel-row >= 0) { goto-row(sel-row - 1); }
             } else if (e.text == Key.Return) {
                 if (sel-row >= 0) { activate(sel-row, sel-col); } else { bar-activate(); }
             } else if (e.text == Key.Escape) {
@@ -652,7 +682,7 @@ export component App inherits Window {
                 color: ri == sel-row ? white : #7d8892;
             }
             Rectangle {
-                x: 60px - max(0, sel-col - 6) * tile-w * (ri == sel-row ? 1 : 0);
+                x: 60px - max(0, (ri == sel-row ? sel-col : r.col) - 6) * tile-w;
                 y: 60px;
                 height: row-h - 60px;
                 animate x { duration: 180ms; easing: ease-out; }
@@ -702,6 +732,88 @@ export component App inherits Window {
             }
         }
     }
+    }
+
+    // Show all: every item of one row as a list. Only the rows near the selection are built.
+    if all-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #0e1318;
+        Text {
+            x: 60px;
+            y: 20px;
+            text: all-title;
+            font-size: 34px;
+            font-weight: 700;
+            color: white;
+        }
+        Text {
+            x: root.width - 360px;
+            y: 28px;
+            width: 300px;
+            text: (sel-all + 1) + " / " + all-items.length;
+            font-size: 22px;
+            color: #7d8892;
+            horizontal-alignment: right;
+        }
+        Rectangle {
+            x: 0;
+            y: 90px;
+            width: root.width;
+            height: root.height - 90px;
+            clip: true;
+            Rectangle {
+                y: -max(0, sel-all - 4) * 72px;
+                animate y { duration: 120ms; easing: ease-out; }
+                for it[i] in all-items: Rectangle {
+                    y: i * 72px;
+                    width: root.width;
+                    height: 72px;
+                    if i >= sel-all - 8 && i <= sel-all + 16: Rectangle {
+                        x: 40px;
+                        width: root.width - 80px;
+                        height: 64px;
+                        border-radius: 10px;
+                        background: i == sel-all ? #243241 : transparent;
+                        border-width: i == sel-all ? 3px : 0px;
+                        border-color: #ffd54a;
+                        Text {
+                            x: 24px;
+                            width: parent.width - 480px;
+                            height: parent.height;
+                            text: it.title;
+                            font-size: 26px;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            color: i == sel-all ? white : #aab4bd;
+                        }
+                        Text {
+                            x: parent.width - 440px;
+                            width: 360px;
+                            height: parent.height;
+                            text: it.subtitle;
+                            font-size: 20px;
+                            overflow: elide;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            color: #6f7b86;
+                        }
+                        if it.viewed: Text {
+                            x: parent.width - 60px;
+                            width: 40px;
+                            height: parent.height;
+                            text: "✓";
+                            font-size: 24px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            color: white;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Settings: the main page (version, upgrade, Controllers) and the Bluetooth controllers page.

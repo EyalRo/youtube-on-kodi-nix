@@ -325,32 +325,60 @@ fn load_rows(addr: &str, cache: &Path, live: bool) -> Result<Vec<RowData>, Strin
         }
         let id = info["id"].as_str().unwrap_or_default();
         let row = rows_json(addr, &format!("/rows/{id}"), cache, live)?;
-        let tiles: Vec<TileData> = row["items"]
-            .as_array()
-            .map(|a| a.as_slice())
-            .unwrap_or_default()
+        let items = row["items"].as_array().map(|a| a.as_slice()).unwrap_or_default();
+        let mut tiles: Vec<TileData> = items
             .iter()
             .take(MAX_TILES)
             .map(|it| {
                 let tid = it["id"].as_str().unwrap_or_default();
                 let art = it["art"].is_string().then(|| load_art(addr, tid, cache, live)).flatten();
-                TileData {
-                    id: tid.into(),
-                    kind: it["kind"].as_str().unwrap_or_default().into(),
-                    title: it["title"].as_str().unwrap_or_default().into(),
-                    subtitle: it["label2"].as_str().unwrap_or_default().into(),
-                    has_art: art.is_some(),
-                    art: art.unwrap_or_default(),
-                    viewed: it["viewed"].as_bool().unwrap_or(false),
-                }
+                tile_data(it, art)
             })
             .collect();
+        // A row shows at most MAX_TILES; its last tile opens the whole row as a list.
+        if items.len() > MAX_TILES {
+            tiles.push(TileData {
+                id: id.into(),
+                kind: "all".into(),
+                title: "Show all".into(),
+                subtitle: format!("{} items", items.len()).into(),
+                has_art: false,
+                art: Default::default(),
+                viewed: false,
+            });
+        }
         out.push(RowData {
+            id: id.into(),
             label: info["label"].as_str().unwrap_or(id).into(),
+            col: 0,
             tiles: ModelRc::new(VecModel::from(tiles)),
         });
     }
     Ok(out)
+}
+
+fn tile_data(it: &Value, art: Option<Image>) -> TileData {
+    TileData {
+        id: it["id"].as_str().unwrap_or_default().into(),
+        kind: it["kind"].as_str().unwrap_or_default().into(),
+        title: it["title"].as_str().unwrap_or_default().into(),
+        subtitle: it["label2"].as_str().unwrap_or_default().into(),
+        has_art: art.is_some(),
+        art: art.unwrap_or_default(),
+        viewed: it["viewed"].as_bool().unwrap_or(false),
+    }
+}
+
+/// Swap in freshly loaded rows, keeping each row's remembered column (matched by row id).
+fn set_rows_keep_cols(ui: &App, mut rows: Vec<RowData>) {
+    let old = ui.get_rows();
+    for r in rows.iter_mut() {
+        let prev = (0..old.row_count()).filter_map(|i| old.row_data(i)).find(|o| o.id == r.id);
+        if let Some(o) = prev {
+            r.col = o.col.min(r.tiles.row_count() as i32 - 1).max(0);
+        }
+    }
+    ui.set_rows(ModelRc::new(VecModel::from(rows)));
 }
 
 /// The raw row listing, to tell whether the library changed without fetching every row.
@@ -398,6 +426,9 @@ fn menu_target(ui: &App) -> Option<(String, Option<i32>, String)> {
             .row_data(ui.get_sel_row() as usize)?
             .tiles
             .row_data(ui.get_sel_col() as usize)?;
+        if ui.get_all_open() || tile.kind == "all" {
+            return None;
+        }
         Some((tile.id.to_string(), None, tile.title.to_string()))
     }
 }
@@ -471,7 +502,7 @@ fn refresh_after_toggle(
         }
     } else {
         match load_rows(mediad, cache, true) {
-            Ok(rows) => ui.set_rows(ModelRc::new(VecModel::from(rows))),
+            Ok(rows) => set_rows_keep_cols(ui, rows),
             Err(e) => tracing::warn!(error = %e, "cannot reload rows after watched toggle"),
         }
     }
@@ -864,7 +895,7 @@ fn main() -> Result<(), slint::PlatformError> {
             match load_rows(&mediad, &cache, true) {
                 Ok(rows) => {
                     tracing::info!(rows = rows.len(), "rows refreshed from mediad");
-                    ui.set_rows(ModelRc::new(VecModel::from(rows)));
+                    set_rows_keep_cols(&ui, rows);
                     let last = ui.get_rows().row_count() as i32 - 1;
                     ui.set_sel_row(ui.get_sel_row().min(last));
                 }
@@ -888,7 +919,7 @@ fn main() -> Result<(), slint::PlatformError> {
             match load_rows(&mediad, &cache, true) {
                 Ok(rows) => {
                     tracing::info!(rows = rows.len(), "rows refreshed");
-                    ui.set_rows(ModelRc::new(VecModel::from(rows)));
+                    set_rows_keep_cols(&ui, rows);
                     let last = ui.get_rows().row_count() as i32 - 1;
                     ui.set_sel_row(ui.get_sel_row().min(last));
                     if let Some(r) = ui.get_rows().row_data(ui.get_sel_row().max(0) as usize) {
@@ -1031,8 +1062,20 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
     {
-        let (weak, page, mediad, cache_dir, play) =
-            (ui.as_weak(), page.clone(), mediad.clone(), cache.join("episodes"), play.clone());
+        let (page, mediad_c, cache_dir, play) = (page.clone(), mediad.clone(), cache.join("episodes"), play.clone());
+        // Open a show/channel page, or start the movie/game/video.
+        let choose = std::rc::Rc::new(move |ui: &App, tile: &TileData| {
+            if matches!(tile.kind.as_str(), "show" | "channel") {
+                let opened = open_detail(ui, &mediad_c, tile.id.as_str(), 0, 0, &cache_dir);
+                if opened.is_some() {
+                    let _ = std::fs::write(state_dir().join("detail"), format!("{} 0 0", tile.id));
+                }
+                *page.borrow_mut() = opened;
+            } else {
+                begin_launch(ui,tile.id.as_str(), inproc, &play);
+            }
+        });
+        let (weak, choose_tile, mediad, cache) = (ui.as_weak(), choose.clone(), mediad.clone(), cache.clone());
         ui.on_activate(move |row, col| {
             let Some(ui) = weak.upgrade() else { return };
             let rows = ui.get_rows();
@@ -1040,17 +1083,51 @@ fn main() -> Result<(), slint::PlatformError> {
                 tracing::warn!(row, col, "activate on a tile that does not exist");
                 return;
             };
+            if tile.kind == "all" {
+                // The whole row as a plain list: no artwork, so a big library opens at once.
+                let label = rows.row_data(row as usize).map(|r| r.label).unwrap_or_default();
+                match rows_json(&mediad, &format!("/rows/{}", tile.id), &cache, true) {
+                    Ok(v) => {
+                        let items: Vec<TileData> = v["items"]
+                            .as_array()
+                            .map(|a| a.as_slice())
+                            .unwrap_or_default()
+                            .iter()
+                            .map(|it| tile_data(it, None))
+                            .collect();
+                        tracing::info!(row, items = items.len(), "show all opened");
+                        ui.set_all_title(label);
+                        ui.set_all_items(ModelRc::new(VecModel::from(items)));
+                        ui.set_sel_all(0);
+                        ui.set_all_open(true);
+                    }
+                    Err(e) => tracing::warn!(error = %e, "cannot load the full row"),
+                }
+                return;
+            }
             let _ = std::fs::create_dir_all(state_dir());
             let _ = std::fs::write(state_dir().join("focus"), format!("{row} {col}"));
             tracing::info!(row, col, id = %tile.id, kind = %tile.kind, title = %tile.title, "tile chosen");
-            if matches!(tile.kind.as_str(), "show" | "channel") {
-                let opened = open_detail(&ui, &mediad, tile.id.as_str(), 0, 0, &cache_dir);
-                if opened.is_some() {
-                    let _ = std::fs::write(state_dir().join("detail"), format!("{} 0 0", tile.id));
+            choose_tile(&ui, &tile);
+        });
+        let weak = ui.as_weak();
+        ui.on_all_activate(move |i| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(tile) = ui.get_all_items().row_data(i as usize) else { return };
+            tracing::info!(id = %tile.id, kind = %tile.kind, title = %tile.title, "tile chosen from the full list");
+            ui.set_all_open(false);
+            choose(&ui, &tile);
+        });
+        // Home puts every row back at its first tile.
+        let weak = ui.as_weak();
+        ui.on_home_reset(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let rows = ui.get_rows();
+            for i in 0..rows.row_count() {
+                if let Some(mut r) = rows.row_data(i) {
+                    r.col = 0;
+                    rows.set_row_data(i, r);
                 }
-                *page.borrow_mut() = opened;
-            } else {
-                begin_launch(&ui, tile.id.as_str(), inproc, &play);
             }
         });
     }
