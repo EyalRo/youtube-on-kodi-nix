@@ -29,6 +29,7 @@ fn main() -> ExitCode {
             .split_whitespace()
             .map(String::from)
             .collect(),
+        game_menu: env_or("PLAYER_GAME_MENU", "").split_whitespace().map(String::from).collect(),
         progress_interval: Duration::from_secs(5),
     };
     tracing::info!(item = %item, debug_build = applog::DEBUG_BUILD, "player starting");

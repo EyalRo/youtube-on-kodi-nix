@@ -21,7 +21,7 @@ mod gamepad;
 
 slint::include_modules!();
 
-/// Debug logging that exists only in debug builds (`RUSTFLAGS="--cfg appliance_debug"`).
+/// Debug logging that exists only in debug b            (sink.button)(slot);lds (`RUSTFLAGS="--cfg appliance_debug"`).
 const DEBUG_BUILD: bool = applog::DEBUG_BUILD;
 
 const MAX_TILES: usize = 40;
@@ -733,7 +733,7 @@ fn abs_range(fd: i32, code: u16) -> (i32, i32) {
 }
 
 /// Make the UI see a navigation key from a game controller.
-fn press_nav(ui: &slint::Weak<App>, nav: gamepad::Nav) {
+fn press_nav<T: slint::ComponentHandle + 'static>(ui: &slint::Weak<T>, nav: gamepad::Nav) {
     use slint::platform::{Key, WindowEvent};
     // Back is Backspace (go back a level), not Escape, which quits the UI on the home screen.
     let key: SharedString = match nav {
@@ -751,11 +751,19 @@ fn press_nav(ui: &slint::Weak<App>, nav: gamepad::Nav) {
     });
 }
 
+/// Where the input watchers send what they read: a game controller's navigation, and a remote's
+/// Back, Home and menu buttons (slot 0, 1, 2). The UI and the game menu each supply their own.
+#[derive(Clone)]
+struct Sink {
+    nav: std::sync::Arc<dyn Fn(gamepad::Nav) + Send + Sync>,
+    button: std::sync::Arc<dyn Fn(usize) + Send + Sync>,
+}
+
 /// Read one input device for as long as it exists. A game controller drives the UI like arrow keys;
 /// anything else is a remote, whose Back, Home and menu keys the key mapping delivers as an empty key
 /// (text "\0"), the same for every button it does not know, so we read the kernel's events as the
 /// player does. Codes: KEY_BACK 158, KEY_HOMEPAGE 172.
-fn watch_device(path: PathBuf, ui: slint::Weak<App>, watched: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>) {
+fn watch_device(path: PathBuf, sink: Sink, watched: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>) {
     use std::os::fd::AsRawFd;
     use std::sync::Mutex;
     const KEY_BACK: u16 = 158;
@@ -796,7 +804,7 @@ fn watch_device(path: PathBuf, ui: slint::Weak<App>, watched: std::sync::Arc<std
             if let Some(pad) = pad.as_mut() {
                 if let Some(nav) = pad.event(kind, code, value) {
                     applog::debug!(?nav, "game controller navigation");
-                    press_nav(&ui, nav);
+                    (sink.nav)(nav);
                 }
                 continue;
             }
@@ -823,11 +831,7 @@ fn watch_device(path: PathBuf, ui: slint::Weak<App>, watched: std::sync::Arc<std
                 last[slot] = Some(std::time::Instant::now());
             }
             tracing::info!(button = match slot { 0 => "back", 1 => "home", _ => "menu" }, "remote button");
-            let _ = ui.upgrade_in_event_loop(move |ui| {
-                if slot == 0 { ui.invoke_go_back() }
-                else if slot == 1 { ui.invoke_go_home() }
-                else { ui.invoke_menu() }
-            });
+            (sink.button)(slot);
         }
         tracing::info!(device = %path.display(), "input device closed");
         // Let the rescan watch this node again if a device comes back under the same name.
@@ -837,7 +841,7 @@ fn watch_device(path: PathBuf, ui: slint::Weak<App>, watched: std::sync::Arc<std
 
 /// Watch every input device, including ones that appear later: a Bluetooth controller connects
 /// after the UI has started, so the device list is rescanned every couple of seconds.
-fn watch_remote(ui: slint::Weak<App>) {
+fn watch_remote(sink: Sink) {
     std::thread::spawn(move || {
         let watched = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::<PathBuf>::new()));
         loop {
@@ -846,7 +850,7 @@ fn watch_remote(ui: slint::Weak<App>) {
                     for path in dir.filter_map(Result::ok).map(|e| e.path()) {
                         let is_event = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("event"));
                         if is_event && watched.lock().unwrap().insert(path.clone()) {
-                            watch_device(path, ui.clone(), watched.clone());
+                            watch_device(path, sink.clone(), watched.clone());
                         }
                     }
                 }
@@ -857,6 +861,36 @@ fn watch_remote(ui: slint::Weak<App>) {
     });
 }
 
+/// Exit status of `--game-menu` that tells the player to end the game (anything else resumes).
+const EXIT_GAME: i32 = 3;
+
+/// `appliance-ui --game-menu`: the menu the player puts in front of a running game (which it has
+/// frozen) when Back, Home or Menu is pressed. Exits `EXIT_GAME` for "Exit game", 0 to resume.
+fn game_menu() -> Result<(), slint::PlatformError> {
+    static CODE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+    let ui = GameMenu::new()?;
+    ui.on_resume(|| {
+        let _ = slint::quit_event_loop();
+    });
+    ui.on_exit_game(|| {
+        CODE.store(EXIT_GAME, std::sync::atomic::Ordering::SeqCst);
+        let _ = slint::quit_event_loop();
+    });
+    if let Some(mut tick) = tick_player() {
+        ui.on_moved(move || tick());
+    }
+    let (nav_ui, button_ui) = (ui.as_weak(), ui.as_weak());
+    watch_remote(Sink {
+        nav: std::sync::Arc::new(move |nav| press_nav(&nav_ui, nav)),
+        // Back, Home and menu again close the menu: the game resumes.
+        button: std::sync::Arc::new(move |_| {
+            let _ = button_ui.upgrade_in_event_loop(|ui| ui.invoke_resume());
+        }),
+    });
+    ui.run()?;
+    std::process::exit(CODE.load(std::sync::atomic::Ordering::SeqCst));
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     applog::init_with_default(
         "appliance-ui",
@@ -864,6 +898,9 @@ fn main() -> Result<(), slint::PlatformError> {
         if DEBUG_BUILD { "info,appliance_ui=debug" } else { "info" },
     );
     tracing::info!(debug_build = DEBUG_BUILD, "appliance-ui starting");
+    if std::env::args().nth(1).as_deref() == Some("--game-menu") {
+        return game_menu();
+    }
     let mediad = env_or("UI_MEDIAD", "127.0.0.1:8730");
     let cache = PathBuf::from(env_or("UI_CACHE", "/tmp/appliance-ui/art"));
     let inproc = matches!(env_or("UI_HANDOFF", "exit").as_str(), "inproc" | "child");
@@ -1272,7 +1309,20 @@ fn main() -> Result<(), slint::PlatformError> {
             *page.borrow_mut() = open_detail(&ui, &mediad, id, s, e, &cache.join("episodes"));
         }
     }
-    watch_remote(ui.as_weak());
+    {
+        let (nav_ui, button_ui) = (ui.as_weak(), ui.as_weak());
+        watch_remote(Sink {
+            nav: std::sync::Arc::new(move |nav| press_nav(&nav_ui, nav)),
+            // Back, Home and the menu button of a remote (slot 0, 1, 2).
+            button: std::sync::Arc::new(move |slot| {
+                let _ = button_ui.upgrade_in_event_loop(move |ui| match slot {
+                    0 => ui.invoke_go_back(),
+                    1 => ui.invoke_go_home(),
+                    _ => ui.invoke_menu(),
+                });
+            }),
+        });
+    }
     ui.run()?;
     if LAUNCH.load(std::sync::atomic::Ordering::SeqCst) {
         std::process::exit(EXIT_LAUNCH);

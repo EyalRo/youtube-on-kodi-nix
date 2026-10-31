@@ -1,6 +1,7 @@
 //! Playback orchestration: ask mediad what to play, run mpv (or RetroArch for games),
 //! report progress back. The display is the child's for as long as it runs; the UI waits.
 
+pub mod gamemenu;
 pub mod http;
 pub mod ipc;
 pub mod keys;
@@ -70,6 +71,9 @@ pub struct Config {
     pub audio_device: String,
     /// Extra mpv options, placed after the defaults so they win (VM tests use `--vo=null`).
     pub mpv_extra: Vec<String>,
+    /// The program (and arguments) run in front of a game when Back, Home or Menu is pressed; it
+    /// exits with `gamemenu::EXIT_GAME` to leave the game. Empty: no menu.
+    pub game_menu: Vec<String>,
     pub progress_interval: Duration,
 }
 
@@ -358,6 +362,10 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
     .into_iter()
     .flatten()
     .collect();
+    let left = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    if !cfg.game_menu.is_empty() {
+        gamemenu::watch(child.id(), cfg.game_menu.clone(), left.clone());
+    }
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let follower = follow_log_file(log_file.clone(), play.id.clone(), stop.clone());
     let status = child
@@ -371,10 +379,11 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
     let _ = std::fs::remove_file(&overrides);
     let _ = std::fs::remove_file(&log_file);
     tracing::info!(id = %play.id, %status, "retroarch exited");
-    if !status.success() {
+    if !status.success() && !left.load(std::sync::atomic::Ordering::SeqCst) {
         tracing::error!(id = %play.id, path = %play.path.display(), %status, "retroarch failed");
     }
-    if status.success() {
+    // Leaving from the menu ends RetroArch with a signal; that is a normal end, not a failure.
+    if status.success() || left.load(std::sync::atomic::Ordering::SeqCst) {
         Ok(())
     } else {
         Err(PlayError::Launch(format!("retroarch exited with {status}")))
@@ -412,6 +421,7 @@ mod tests {
             drm_connector: "HDMI-A-1".into(),
             audio_device: "alsa/hdmi:CARD=PCH,DEV=0".into(),
             mpv_extra: vec![],
+            game_menu: vec![],
             progress_interval: Duration::from_millis(0),
         }
     }

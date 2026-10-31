@@ -1191,3 +1191,64 @@ export component App inherits Window {
         }
     }
 }
+
+// The menu in front of a frozen game (`appliance-ui --game-menu`): resume or leave.
+export component GameMenu inherits Window {
+    in-out property <int> sel: 0;
+    callback resume();
+    callback exit-game();
+    callback moved();
+    background: #000000b8;
+    forward-focus: fs;
+    default-font-size: 22px;
+
+    fs := FocusScope {
+        key-pressed(e) => {
+            if (e.text == Key.UpArrow) { if (sel > 0) { sel -= 1; moved(); } }
+            else if (e.text == Key.DownArrow) { if (sel < 1) { sel += 1; moved(); } }
+            else if (e.text == Key.Return) { if (sel == 0) { resume(); } else { exit-game(); } }
+            else if (e.text == Key.Backspace || e.text == Key.Escape || e.text == Key.Home) { resume(); }
+            else { return reject; }
+            accept
+        }
+    }
+
+    Rectangle {
+        x: (root.width - 560px) / 2;
+        y: (root.height - 300px) / 2;
+        width: 560px;
+        height: 300px;
+        border-radius: 20px;
+        background: #16202a;
+        border-width: 2px;
+        border-color: #2a3844;
+        Text {
+            x: 32px;
+            y: 28px;
+            width: 496px;
+            text: "Game paused";
+            font-size: 26px;
+            font-weight: 600;
+            color: white;
+        }
+        SettingsRow {
+            y: 100px;
+            label: "Resume";
+            selected: sel == 0;
+        }
+        SettingsRow {
+            y: 166px;
+            label: "Exit game";
+            selected: sel == 1;
+        }
+        Text {
+            x: 32px;
+            y: 246px;
+            width: 496px;
+            text: "back resumes";
+            font-size: 18px;
+            color: #7d8892;
+            horizontal-alignment: center;
+        }
+    }
+}

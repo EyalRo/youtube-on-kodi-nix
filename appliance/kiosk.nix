@@ -234,6 +234,8 @@ in
         SLINT_SCALE_FACTOR = cfg.scaleFactor;
         UI_HANDOFF = "child";
         PLAYER_WAYLAND = "1";
+        # Back, Home and Menu during a game open a menu with an exit entry (a second window of the UI).
+        PLAYER_GAME_MENU = "${cfg.package}/bin/appliance-ui --game-menu";
       };
     };
     systemd.services."cage-tty1" = mkIf (cfg.display == "cage") {
