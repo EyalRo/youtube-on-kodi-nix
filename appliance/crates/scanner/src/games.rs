@@ -32,6 +32,22 @@ fn sidecar_date(rom: &Path) -> Option<NaiveDate> {
     nfo_tag(&rom.with_extension("nfo"), &["releasedate"]).and_then(|v| parse_release(&v))
 }
 
+/// A Genesis-folder ROM that is really a 32X game: `32X` in its name, or `SEGA 32X` in the header
+/// (plain dumps only; `.smd` is interleaved).
+fn is_32x(path: &Path, ext: &str) -> bool {
+    if file_name(path).to_ascii_lowercase().contains("32x") {
+        return true;
+    }
+    if !matches!(ext, "bin" | "md" | "gen") {
+        return false;
+    }
+    use std::io::{Read, Seek, SeekFrom};
+    let mut head = [0u8; 16];
+    std::fs::File::open(path)
+        .and_then(|mut f| f.seek(SeekFrom::Start(0x100)).and_then(|_| f.read_exact(&mut head)))
+        .is_ok_and(|()| head.starts_with(b"SEGA 32X"))
+}
+
 /// Archive.org names DOS games `Digger_1983.zip`: the year is a suffix, the words are joined by underscores.
 fn dos_split(stem: &str) -> (String, Option<i32>) {
     let words = stem.replace('_', " ");
@@ -90,6 +106,12 @@ pub fn scan(media_root: &Path, db: &ReleaseDb) -> Scan {
             );
             continue;
         }
+        // Genesis Plus GX crashes on 32X games, which have their own core.
+        let system = if system.id == "genesis" && is_32x(path, &ext) {
+            catalog::system_by_id("32x").unwrap_or(system)
+        } else {
+            system
+        };
         // The Neo Geo BIOS set lives beside the games but is not one.
         if system.id == "neogeo" && file_name(path).eq_ignore_ascii_case("neogeo.zip") {
             continue;
@@ -233,5 +255,22 @@ mod tests {
         let e = &s.entries[0];
         assert_eq!((e.title.as_str(), e.system.as_deref()), ("Digger", Some("dos")));
         assert_eq!(e.date, NaiveDate::from_ymd_opt(1983, 1, 1));
+    }
+
+    #[test]
+    fn genesis_folder_32x_games_go_to_the_32x_system() {
+        let m = tempfile::tempdir().unwrap();
+        let dir = m.path().join("roms/megadrive");
+        create_dir_all(&dir).unwrap();
+        write(dir.join("Blackthorne 32X (4) [!].smd"), b"r").unwrap();
+        write(dir.join("Aladdin (U) [!].md"), b"r").unwrap();
+        let mut header = vec![0u8; 0x200];
+        header[0x100..0x108].copy_from_slice(b"SEGA 32X");
+        write(dir.join("Doom.bin"), header).unwrap();
+        let s = scan(m.path(), &ReleaseDb::empty());
+        let sys = |t: &str| s.entries.iter().find(|e| e.title == t).unwrap().system.clone();
+        assert_eq!(sys("Blackthorne 32X").as_deref(), Some("32x"));
+        assert_eq!(sys("Doom").as_deref(), Some("32x"));
+        assert_eq!(sys("Aladdin").as_deref(), Some("genesis"));
     }
 }

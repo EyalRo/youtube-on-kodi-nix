@@ -324,3 +324,46 @@ async fn rescan_picks_up_new_files_and_refuses_an_unmounted_share() {
     let (_, v) = json_of(&app, "GET", "/health", None).await;
     assert_eq!(v["entries"], 4);
 }
+
+fn app_with_channels(root: &Path, file: &Path) -> axum::Router {
+    let state = AppState::new(Store::open_in_memory().unwrap(), root.to_path_buf(), ReleaseDb::empty())
+        .with_channels_file(file.to_path_buf());
+    router(state)
+}
+
+#[tokio::test]
+async fn channels_can_be_listed_followed_and_unfollowed() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("channels.conf");
+    fs::write(&file, "# mine\n@idlecub | Idle cub\n@Lunduke\n").unwrap();
+    let app = app_with_channels(dir.path(), &file);
+
+    let (st, body) = call(&app, "GET", "/youtube/channels", None).await;
+    assert_eq!(st, StatusCode::OK);
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["channels"], json!([{"entry": "@idlecub", "name": "Idle cub"}, {"entry": "@Lunduke", "name": "@Lunduke"}]));
+
+    let (st, body) = call(&app, "POST", "/youtube/channels", Some(json!({"entry": "UCVcCi1Vkcg9dtcSxR0dAZZw", "name": "John Wolfe Gaming"}))).await;
+    assert_eq!(st, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert!(fs::read_to_string(&file).unwrap().contains("UCVcCi1Vkcg9dtcSxR0dAZZw | John Wolfe Gaming"));
+    assert!(fs::read_to_string(&file).unwrap().starts_with("# mine"), "comments are kept");
+
+    let (_, body) = call(&app, "POST", "/youtube/channels", Some(json!({"entry": "@lunduke"}))).await;
+    assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["followed"], json!(false), "already followed");
+
+    let (st, _) = call(&app, "POST", "/youtube/channels", Some(json!({"entry": "not a channel"}))).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+
+    let (st, _) = call(&app, "POST", "/youtube/channels/remove", Some(json!({"entry": "@idlecub"}))).await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(!fs::read_to_string(&file).unwrap().contains("idlecub"));
+    let (st, _) = call(&app, "POST", "/youtube/channels/remove", Some(json!({"entry": "@idlecub"}))).await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn channels_need_a_configured_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let (st, _) = call(&app(dir.path()), "GET", "/youtube/channels", None).await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+}

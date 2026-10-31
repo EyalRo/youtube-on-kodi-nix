@@ -222,6 +222,10 @@ in
       } // vlogsEnv
       // lib.optionalAttrs (cfg.releaseDbDir != null) {
         MEDIAD_RELEASE_DB = toString cfg.releaseDbDir;
+      }
+      // lib.optionalAttrs ytsyncEnabled {
+        # The settings page follows and unfollows channels through mediad, which can write the list.
+        MEDIAD_YTSYNC_CHANNELS = toString cfg.ytsync.channelsFile;
       };
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/mediad";
@@ -233,7 +237,7 @@ in
         ProtectHome = true;
         PrivateTmp = true;
         NoNewPrivileges = true;
-        ReadWritePaths = [ cfg.stateDir ];
+        ReadWritePaths = [ cfg.stateDir ] ++ lib.optional ytsyncEnabled cfg.ytsync.stateDir;
         ReadOnlyPaths = [ cfg.mediaRoot ];
       };
     };

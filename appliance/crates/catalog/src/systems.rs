@@ -96,6 +96,16 @@ pub const SYSTEMS: &[System] = &[
         playable: true,
     },
     System {
+        id: "32x",
+        name: "32X",
+        exts: &["32x"],
+        // Genesis ROMs that are 32X games are recognised by name or header (see the scanner), so a
+        // 32X folder only needs to hold them under any Genesis extension.
+        folder_exts: &["bin", "md", "smd", "gen"],
+        aliases: &["32x", "sega32x"],
+        playable: true,
+    },
+    System {
         id: "dos",
         name: "DOS",
         exts: &["dosz"],

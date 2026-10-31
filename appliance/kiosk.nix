@@ -148,6 +148,7 @@ in
         cores.mupen64plus
         cores.fbneo
         cores.dosbox-pure
+        cores.picodrive
       ]);
       description = "RetroArch package (with libretro cores) used for game playback.";
     };

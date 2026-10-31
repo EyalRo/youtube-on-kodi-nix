@@ -23,6 +23,8 @@ pub struct AppState {
     release_db: Arc<ReleaseDb>,
     /// Where artsync stores fetched posters (`<item id>.jpg|png|webp`).
     art_cache: Option<Arc<PathBuf>>,
+    /// The followed-YouTube-channels file `ytsync` reads; the settings page edits it through here.
+    channels_file: Option<Arc<PathBuf>>,
 }
 
 impl AppState {
@@ -32,7 +34,13 @@ impl AppState {
             media_root: Arc::new(media_root),
             release_db: Arc::new(release_db),
             art_cache: None,
+            channels_file: None,
         }
+    }
+
+    pub fn with_channels_file(mut self, file: PathBuf) -> Self {
+        self.channels_file = Some(Arc::new(file));
+        self
     }
 
     pub fn with_art_cache(mut self, dir: PathBuf) -> Self {
@@ -192,6 +200,8 @@ pub fn router(state: AppState) -> Router {
         .route("/items/{id}/art", get(art))
         .route("/episodes/{id}/art", get(episode_art))
         .route("/rescan", post(rescan))
+        .route("/youtube/channels", get(channels_list).post(channels_follow))
+        .route("/youtube/channels/remove", post(channels_unfollow))
         .layer(axum::middleware::from_fn(log_requests))
         .with_state(state)
 }
@@ -344,6 +354,71 @@ async fn serve_image(path: PathBuf) -> ApiResult<Response> {
         "image/jpeg"
     };
     Ok(([(header::CONTENT_TYPE, mime)], bytes).into_response())
+}
+
+#[derive(Deserialize)]
+struct ChannelBody {
+    entry: String,
+    name: Option<String>,
+}
+
+fn channels_path(s: &AppState) -> Result<&std::path::Path, ApiError> {
+    s.channels_file
+        .as_deref()
+        .map(PathBuf::as_path)
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "no channels file is configured".into()))
+}
+
+fn read_channels(path: &std::path::Path) -> Result<String, ApiError> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => Ok(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("cannot read {}: {e}", path.display()))),
+    }
+}
+
+/// Write through a temporary file so a crash never leaves a half-written list for `ytsync`.
+fn write_channels(path: &std::path::Path, text: &str) -> Result<(), ApiError> {
+    let tmp = path.with_extension("conf.tmp");
+    std::fs::write(&tmp, text)
+        .and_then(|()| std::fs::rename(&tmp, path))
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("cannot write {}: {e}", path.display())))
+}
+
+async fn channels_list(State(s): State<AppState>) -> ApiResult<Json<Value>> {
+    let text = read_channels(channels_path(&s)?)?;
+    let list: Vec<Value> = ytsync::channels::entries(&text)
+        .into_iter()
+        .map(|(entry, name)| json!({ "entry": entry, "name": name.unwrap_or_else(|| entry.clone()) }))
+        .collect();
+    Ok(Json(json!({ "channels": list })))
+}
+
+async fn channels_follow(State(s): State<AppState>, Json(b): Json<ChannelBody>) -> ApiResult<Json<Value>> {
+    let path = channels_path(&s)?;
+    let text = read_channels(path)?;
+    match ytsync::channels::follow(&text, &b.entry, b.name.as_deref()) {
+        Ok(Some(new)) => {
+            write_channels(path, &new)?;
+            tracing::info!(entry = %b.entry.trim(), "channel followed from the settings page");
+            Ok(Json(json!({ "followed": true })))
+        }
+        Ok(None) => Ok(Json(json!({ "followed": false, "reason": "already followed" }))),
+        Err(e) => Err(ApiError(StatusCode::BAD_REQUEST, e)),
+    }
+}
+
+async fn channels_unfollow(State(s): State<AppState>, Json(b): Json<ChannelBody>) -> ApiResult<Json<Value>> {
+    let path = channels_path(&s)?;
+    let text = read_channels(path)?;
+    match ytsync::channels::unfollow(&text, &b.entry) {
+        Some(new) => {
+            write_channels(path, &new)?;
+            tracing::info!(entry = %b.entry.trim(), "channel unfollowed from the settings page");
+            Ok(Json(json!({ "removed": true })))
+        }
+        None => Err(ApiError(StatusCode::NOT_FOUND, format!("not following {:?}", b.entry))),
+    }
 }
 
 async fn rescan(State(s): State<AppState>) -> ApiResult<Json<Value>> {

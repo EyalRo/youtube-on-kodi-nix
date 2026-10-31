@@ -89,6 +89,7 @@ pub fn core_for(system: &str) -> Option<&'static str> {
         "gb" | "gbc" | "gba" => "mgba",
         "n64" => "mupen64plus_next",
         "neogeo" => "fbneo",
+        "32x" => "picodrive",
         "dos" => "dosbox_pure",
         _ => return None,
     })
@@ -191,6 +192,17 @@ pub fn retroarch_overrides(cfg: &Config, system: Option<&str>) -> String {
         }
     }
     out
+}
+
+/// Core options forced for a system, in the core's `.opt` format. DOSBox Pure ignores a game's
+/// `dosbox.conf` unless told to read it (old games ship one that slows the emulated PC down to
+/// the speed they were written for, and without it they run far too fast), and it complains about
+/// a missing frontend MIDI device unless MIDI output is off.
+pub fn core_options(system: Option<&str>) -> Option<&'static str> {
+    match system {
+        Some("dos") => Some("dosbox_pure_conf = \"inside\"\ndosbox_pure_midi = \"disabled\"\n"),
+        _ => None,
+    }
 }
 
 pub fn retroarch_args(cfg: &Config, play: &Play, overrides: &Path) -> Result<Vec<String>, PlayError> {
@@ -335,8 +347,14 @@ fn forward_log(stream: impl std::io::Read + Send + 'static, id: &str) -> std::th
 }
 
 fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
+    let mut text = retroarch_overrides(cfg, play.system.as_deref());
+    if let Some(opts) = core_options(play.system.as_deref()) {
+        let file = std::env::temp_dir().join(format!("retroarch-core-options-{}.opt", std::process::id()));
+        std::fs::write(&file, opts).map_err(|e| PlayError::Launch(format!("cannot write {}: {e}", file.display())))?;
+        text.push_str(&format!("core_options_path = \"{}\"\n", file.display()));
+    }
     let overrides = std::env::temp_dir().join(format!("retroarch-overrides-{}.cfg", std::process::id()));
-    std::fs::write(&overrides, retroarch_overrides(cfg, play.system.as_deref())).map_err(|e| {
+    std::fs::write(&overrides, text).map_err(|e| {
         tracing::error!(path = %overrides.display(), error = %e, "cannot write retroarch overrides");
         PlayError::Launch(format!("cannot write {}: {e}", overrides.display()))
     })?;
@@ -489,6 +507,13 @@ mod tests {
     fn retroarch_plays_through_the_tv_audio_device() {
         let o = retroarch_overrides(&cfg(), Some("genesis"));
         assert!(o.contains("audio_driver = \"alsa\"") && o.contains("audio_device = \"hdmi:CARD=PCH,DEV=0\""), "{o}");
+    }
+
+    #[test]
+    fn dos_games_read_their_own_conf_and_have_no_midi_output() {
+        let o = core_options(Some("dos")).unwrap();
+        assert!(o.contains("dosbox_pure_conf = \"inside\"") && o.contains("dosbox_pure_midi = \"disabled\""), "{o}");
+        assert_eq!(core_options(Some("nes")), None);
     }
 
     #[test]

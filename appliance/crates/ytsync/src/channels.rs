@@ -85,6 +85,18 @@ pub fn parse(text: &str) -> Parsed {
     out
 }
 
+/// The followed channels as written in the file: `(entry, display name)` for each line, in order.
+pub fn entries(text: &str) -> Vec<(String, Option<String>)> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|line| {
+            let (query, name) = line.split_once('|').map_or((line, None), |(q, n)| (q.trim(), Some(n.trim().to_string()).filter(|n| !n.is_empty())));
+            videos_url(query).map(|_| (query.to_string(), name))
+        })
+        .collect()
+}
+
 /// The text with `entry` added (as `entry | name` when a name is given), or `None` when that
 /// channel is already followed. Rejects entries `parse` would skip.
 pub fn follow(text: &str, entry: &str, name: Option<&str>) -> Result<Option<String>, String> {

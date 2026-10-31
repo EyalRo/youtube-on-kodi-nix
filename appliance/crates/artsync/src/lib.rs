@@ -107,6 +107,7 @@ pub fn libretro_dir(system: &str) -> Option<&'static str> {
         "n64" => "Nintendo - Nintendo 64",
         "neogeo" => "SNK - Neo Geo",
         "dos" => "DOS",
+        "32x" => "Sega - 32X",
         _ => return None,
     })
 }
