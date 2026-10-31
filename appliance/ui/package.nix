@@ -1,11 +1,11 @@
 # The living-room UI (Slint on DRM/KMS) and its session supervisor.
-{ lib, rustPlatform, pkg-config, makeWrapper, imagemagick, dejavu_fonts, alsa-utils, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd, wayland
+{ lib, rustPlatform, pkg-config, makeWrapper, imagemagick, dejavu_fonts, alsa-lib, fontconfig, libxkbcommon, libinput, udev, libgbm, libGL, seatd, wayland
 , debug ? false # compile the debug logs in (see ../package.nix)
 }:
 
 rustPlatform.buildRustPackage {
   pname = "appliance-ui";
-  version = "0.5.3";
+  version = "0.5.4";
 
   src = lib.fileset.toSource {
     root = ../.;
@@ -34,7 +34,7 @@ rustPlatform.buildRustPackage {
   '';
 
   nativeBuildInputs = [ pkg-config makeWrapper imagemagick ];
-  buildInputs = [ fontconfig libxkbcommon libinput udev libgbm libGL seatd wayland ];
+  buildInputs = [ alsa-lib fontconfig libxkbcommon libinput udev libgbm libGL seatd wayland ];
 
   postInstall = ''
     # The logo as an 8-bit alpha mask for fbsplash (and a PNG for the boot splash).
@@ -47,8 +47,7 @@ rustPlatform.buildRustPackage {
       -pointsize 190 -gravity center -fill "#e50914" -annotate +0+0 Shmetflix $out/share/appliance-ui/logo.png
     # session.sh lives in the ui/ subdir of the combined source.
     install -Dm755 ui/session.sh $out/bin/appliance-ui-session
-    # The focus tick is played with aplay.
-    wrapProgram $out/bin/appliance-ui --prefix PATH : ${lib.makeBinPath [ alsa-utils ]} --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ wayland libxkbcommon libGL ]}
+    wrapProgram $out/bin/appliance-ui --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ wayland libxkbcommon libGL ]}
   '';
 
   meta = {

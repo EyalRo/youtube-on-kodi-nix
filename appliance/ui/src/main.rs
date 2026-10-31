@@ -540,62 +540,71 @@ fn power_event(event: &str, action: &str, detail: &str) {
     );
 }
 
-/// A 30 ms decaying 1.8 kHz blip as a 16-bit mono WAV, so there is no sound asset to ship.
-fn tick_wav() -> Vec<u8> {
-    const RATE: u32 = 44_100;
-    let n = RATE as usize * 30 / 1000;
-    let mut pcm = Vec::with_capacity(n * 2);
-    for i in 0..n {
-        let t = i as f32 / RATE as f32;
-        let s = (t * 1800.0 * std::f32::consts::TAU).sin() * (-t * 150.0).exp() * 0.6;
-        pcm.extend_from_slice(&((s * i16::MAX as f32) as i16).to_le_bytes());
-    }
-    let mut w = Vec::with_capacity(44 + pcm.len());
-    w.extend_from_slice(b"RIFF");
-    w.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
-    w.extend_from_slice(b"WAVEfmt ");
-    w.extend_from_slice(&16u32.to_le_bytes());
-    w.extend_from_slice(&1u16.to_le_bytes()); // PCM
-    w.extend_from_slice(&1u16.to_le_bytes()); // mono
-    w.extend_from_slice(&RATE.to_le_bytes());
-    w.extend_from_slice(&(RATE * 2).to_le_bytes());
-    w.extend_from_slice(&2u16.to_le_bytes());
-    w.extend_from_slice(&16u16.to_le_bytes());
-    w.extend_from_slice(b"data");
-    w.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
-    w.extend_from_slice(&pcm);
-    w
+const TICK_RATE: u32 = 44_100;
+
+/// A 30 ms decaying 1.8 kHz blip as 16-bit mono samples, so there is no sound asset to ship.
+fn tick_samples() -> Vec<i16> {
+    let n = TICK_RATE as usize * 30 / 1000;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / TICK_RATE as f32;
+            let s = (t * 1800.0 * std::f32::consts::TAU).sin() * (-t * 150.0).exp() * 0.6;
+            (s * i16::MAX as f32) as i16
+        })
+        .collect()
 }
 
-/// Plays the tick through `UI_TICK_PLAYER` (default `aplay -q`). A tick that arrives while the
-/// previous one is still playing is dropped, so holding a direction cannot pile up processes.
-/// `UI_TICK=off` silences it.
+fn open_tick_pcm(device: &str) -> Result<alsa::PCM, alsa::Error> {
+    use alsa::pcm::{Access, Format, HwParams};
+    let pcm = alsa::PCM::new(device, alsa::Direction::Playback, false)?;
+    {
+        let hw = HwParams::any(&pcm)?;
+        hw.set_channels(1)?;
+        hw.set_rate(TICK_RATE, alsa::ValueOr::Nearest)?;
+        hw.set_format(Format::s16())?;
+        hw.set_access(Access::RWInterleaved)?;
+        pcm.hw_params(&hw)?;
+    }
+    Ok(pcm)
+}
+
+/// Plays the tick straight to ALSA (`UI_TICK_DEVICE`, default "default") from a thread that owns
+/// the PCM. A tick that arrives while the previous one is still playing is dropped, so holding a
+/// direction cannot pile them up. `UI_TICK=off` silences it.
 fn tick_player() -> Option<impl FnMut()> {
     if env_or("UI_TICK", "on") == "off" {
         return None;
     }
-    let wav = state_dir().join("tick.wav");
-    std::fs::create_dir_all(state_dir()).ok()?;
-    std::fs::write(&wav, tick_wav()).ok()?;
-    let player = env_or("UI_TICK_PLAYER", "aplay -q");
-    let mut child: Option<std::process::Child> = None;
-    Some(move || {
-        if let Some(c) = child.as_mut() {
-            if matches!(c.try_wait(), Ok(None)) {
-                return;
+    let device = env_or("UI_TICK_DEVICE", "default");
+    let samples = tick_samples();
+    let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+    std::thread::spawn(move || {
+        let mut pcm: Option<alsa::PCM> = None;
+        let mut warned = false;
+        for () in rx {
+            if pcm.is_none() {
+                match open_tick_pcm(&device) {
+                    Ok(p) => pcm = Some(p),
+                    Err(e) => {
+                        if !std::mem::replace(&mut warned, true) {
+                            tracing::warn!(%device, error = %e, "cannot open the sound device for the tick");
+                        }
+                        continue;
+                    }
+                }
+            }
+            let Some(p) = pcm.as_ref() else { continue };
+            let played = p.io_i16().and_then(|io| io.writei(&samples)).and_then(|_| p.drain());
+            if let Err(e) = played {
+                // Underrun or a vanished device: try to recover, else reopen on the next tick.
+                if p.try_recover(e, true).is_err() {
+                    pcm = None;
+                }
             }
         }
-        let mut parts = player.split_whitespace();
-        let Some(prog) = parts.next() else { return };
-        child = Command::new(prog)
-            .args(parts)
-            .arg(&wav)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map_err(|e| tracing::warn!(error = %e, "cannot play the tick"))
-            .ok();
+    });
+    Some(move || {
+        let _ = tx.try_send(());
     })
 }
 
@@ -1088,13 +1097,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 let label = rows.row_data(row as usize).map(|r| r.label).unwrap_or_default();
                 match rows_json(&mediad, &format!("/rows/{}", tile.id), &cache, true) {
                     Ok(v) => {
-                        let items: Vec<TileData> = v["items"]
+                        let mut items: Vec<TileData> = v["items"]
                             .as_array()
                             .map(|a| a.as_slice())
                             .unwrap_or_default()
                             .iter()
                             .map(|it| tile_data(it, None))
                             .collect();
+                        // The full list is for finding a title, so it is alphabetical whatever the row's order.
+                        items.sort_by_cached_key(|t| t.title.to_lowercase());
                         tracing::info!(row, items = items.len(), "show all opened");
                         ui.set_all_title(label);
                         ui.set_all_items(ModelRc::new(VecModel::from(items)));

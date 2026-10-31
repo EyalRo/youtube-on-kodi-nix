@@ -36,7 +36,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libfontconfig1-dev libxkbcommon-dev libinput-dev \
-            libudev-dev libgbm-dev libseat-dev libgl-dev libmpv-dev libwayland-dev
+            libudev-dev libgbm-dev libseat-dev libgl-dev libmpv-dev libwayland-dev libasound2-dev
       # Debug logs compiled in, as the appliance runs today (see appliance/package.nix).
       - name: Back end tests and build
         working-directory: appliance
