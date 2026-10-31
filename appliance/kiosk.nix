@@ -41,7 +41,13 @@ let
   # cage mode: set the wanted output mode (if any) before the UI draws its first frame.
   cageSession = pkgs.writeShellScript "appliance-cage-session" ''
     ${lib.optionalString (cfg.outputMode != null) ''
-      ${pkgs.wlr-randr}/bin/wlr-randr --output ${cfg.drmConnector} --mode ${cfg.outputMode} || true
+      # The compositor may not have set up the output yet when this starts ("unknown output"); a
+      # 4K TV left on its preferred 30 Hz mode makes every 60 fps game run at half speed. Retry for
+      # up to ten seconds.
+      for ((n = 0; n < 50; n++)); do
+        ${pkgs.wlr-randr}/bin/wlr-randr --output ${cfg.drmConnector} --mode ${cfg.outputMode} && break
+        sleep 0.2
+      done
     ''}
     exec ${cfg.package}/bin/appliance-ui
   '';
