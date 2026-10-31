@@ -548,7 +548,7 @@ fn tick_samples() -> Vec<i16> {
     (0..n)
         .map(|i| {
             let t = i as f32 / TICK_RATE as f32;
-            let s = (t * 1800.0 * std::f32::consts::TAU).sin() * (-t * 150.0).exp() * 0.6;
+            let s = (t * 1800.0 * std::f32::consts::TAU).sin() * (-t * 150.0).exp() * 0.2;
             (s * i16::MAX as f32) as i16
         })
         .collect()
