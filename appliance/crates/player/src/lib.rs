@@ -203,9 +203,51 @@ pub fn retroarch_overrides(cfg: &Config, system: Option<&str>) -> String {
 /// system directory) plays it.
 pub fn core_options(system: Option<&str>, soundfont: Option<&str>) -> Option<String> {
     match system {
-        Some("dos") => Some(format!("dosbox_pure_conf = \"inside\"\ndosbox_pure_midi = \"{}\"\n", soundfont.unwrap_or("disabled"))),
+        Some("dos") => Some(match soundfont {
+            // The GM SoundFont renders quietly next to the Sound Blaster's own sound effects.
+            Some(font) => format!("dosbox_pure_conf = \"inside\"\ndosbox_pure_midi = \"{font}\"\ndosbox_pure_volume_midi = \"3.0\"\n"),
+            None => "dosbox_pure_conf = \"inside\"\ndosbox_pure_midi = \"disabled\"\n".to_string(),
+        }),
         _ => None,
     }
+}
+
+/// The directory name RetroArch keeps a core's options under (`config/<name>/<name>.opt`).
+fn core_options_name(system: Option<&str>) -> Option<&'static str> {
+    match system {
+        Some("dos") => Some("DOSBox-pure"),
+        _ => None,
+    }
+}
+
+/// `existing` with the `key = "value"` lines of `forced` replacing or joining its own.
+pub fn merge_options(existing: &str, forced: &str) -> String {
+    let key = |l: &str| l.split('=').next().unwrap_or("").trim().to_string();
+    let forced_keys: Vec<String> = forced.lines().map(key).collect();
+    let mut out: String = existing
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !forced_keys.contains(&key(l)))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    out.push_str(forced);
+    out
+}
+
+/// Put the forced options into the core's own options file. (RetroArch has no config key that
+/// points a core at another file: `core_options_path` in an appended config is ignored, which left
+/// DOS games on the core's defaults.) The core loads the file at start and rewrites it on exit.
+fn apply_core_options(system: Option<&str>, forced: &str) -> Result<(), PlayError> {
+    let Some(name) = core_options_name(system) else { return Ok(()) };
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .ok_or_else(|| PlayError::Launch("no HOME to keep the core options in".into()))?;
+    let dir = base.join("retroarch").join("config").join(name);
+    let file = dir.join(format!("{name}.opt"));
+    let existing = std::fs::read_to_string(&file).unwrap_or_default();
+    std::fs::create_dir_all(&dir)
+        .and_then(|()| std::fs::write(&file, merge_options(&existing, forced)))
+        .map_err(|e| PlayError::Launch(format!("cannot write {}: {e}", file.display())))
 }
 
 pub fn retroarch_args(cfg: &Config, play: &Play, overrides: &Path) -> Result<Vec<String>, PlayError> {
@@ -367,9 +409,7 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         _ => None,
     };
     if let Some(opts) = core_options(play.system.as_deref(), font.as_deref()) {
-        let file = std::env::temp_dir().join(format!("retroarch-core-options-{}.opt", std::process::id()));
-        std::fs::write(&file, opts).map_err(|e| PlayError::Launch(format!("cannot write {}: {e}", file.display())))?;
-        text.push_str(&format!("core_options_path = \"{}\"\n", file.display()));
+        apply_core_options(play.system.as_deref(), &opts)?;
     }
     let overrides = std::env::temp_dir().join(format!("retroarch-overrides-{}.cfg", std::process::id()));
     std::fs::write(&overrides, text).map_err(|e| {
@@ -534,6 +574,13 @@ mod tests {
         let o = core_options(Some("dos"), None).unwrap();
         assert!(o.contains("dosbox_pure_conf = \"inside\"") && o.contains("dosbox_pure_midi = \"disabled\""), "{o}");
         assert_eq!(core_options(Some("nes"), None), None);
+    }
+
+    #[test]
+    fn forced_options_replace_the_cores_own_and_keep_the_rest() {
+        let merged = merge_options("a = \"1\"\ndosbox_pure_midi = \"frontend\"\nb = \"2\"\n", "dosbox_pure_midi = \"x.sf2\"\nc = \"3\"\n");
+        assert_eq!(merged, "a = \"1\"\nb = \"2\"\ndosbox_pure_midi = \"x.sf2\"\nc = \"3\"\n");
+        assert_eq!(merge_options("", "k = \"v\"\n"), "k = \"v\"\n");
     }
 
     #[test]
