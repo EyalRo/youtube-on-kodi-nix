@@ -347,7 +347,7 @@ fn load_rows(addr: &str, cache: &Path, live: bool) -> Result<Vec<RowData>, Strin
                 tile_data(it, art)
             })
             .collect();
-        if id.starts_with("games") {
+        if id.starts_with("games") || id == "movies" {
             mark_years(items, &mut tiles);
         }
         // A row shows at most MAX_TILES; its last tile opens the whole row as a list.
@@ -378,15 +378,13 @@ fn year_of(it: &Value) -> Option<&str> {
     it["date"].as_str().and_then(|d| d.get(..4)).filter(|y| y.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// Games arrive oldest first: mark each tile whose year differs from the one before it, for the separator.
+/// Mark each tile whose year differs from the dated tile before it (and the first dated one), for the separator.
 fn mark_years(items: &[Value], tiles: &mut [TileData]) {
     let mut prev: Option<&str> = None;
     for (it, tile) in items.iter().zip(tiles.iter_mut()) {
         let year = year_of(it);
-        if let (Some(p), Some(y)) = (prev, year) {
-            if p != y {
-                tile.year_mark = y.into();
-            }
+        if let Some(y) = year.filter(|y| prev != Some(*y)) {
+            tile.year_mark = y.into();
         }
         prev = year.or(prev);
     }
@@ -1422,7 +1420,7 @@ mod year_tests {
     use super::*;
 
     #[test]
-    fn a_tile_is_marked_where_the_year_changes() {
+    fn a_tile_is_marked_where_the_year_starts() {
         let items: Vec<Value> = [Some("1990-01-01"), Some("1990-06-01"), Some("1991-01-01"), Some("1991-02-02"), Some("1993-01-01"), None]
             .iter()
             .map(|d| serde_json::json!({ "id": "x", "title": "t", "date": d }))
@@ -1430,6 +1428,6 @@ mod year_tests {
         let mut tiles: Vec<TileData> = items.iter().map(|it| tile_data(it, None)).collect();
         mark_years(&items, &mut tiles);
         let marks: Vec<String> = tiles.iter().map(|t| t.year_mark.to_string()).collect();
-        assert_eq!(marks, ["", "", "1991", "", "1993", ""]);
+        assert_eq!(marks, ["1990", "", "1991", "", "1993", ""]);
     }
 }
