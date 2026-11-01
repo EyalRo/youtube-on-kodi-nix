@@ -4233,7 +4233,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
  "raw-window-handle",
- "redox_syscall 0.5.20",
+ "redox_syscall 0.5.18",
  "rustix 1.1.5",
  "tracing",
  "wasm-bindgen",
