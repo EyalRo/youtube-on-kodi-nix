@@ -8,9 +8,9 @@ use chrono::NaiveDate;
 use regex::Regex;
 
 static GAME: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?s)game\s*\(\s*name\s+"([^"]+)"(.*?)\n\)"#).unwrap());
-static YEAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"releaseyear\s+(\d+)").unwrap());
-static MONTH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"releasemonth\s+(\d+)").unwrap());
+    LazyLock::new(|| Regex::new(r#"(?s)game\s*\(\s*(?:name|comment)\s+"([^"]+)"(.*?)\n\)"#).unwrap());
+static YEAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"releaseyear\s+"?(\d+)"#).unwrap());
+static MONTH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"releasemonth\s+"?(\d+)"#).unwrap());
 
 /// Release dates from libretro-database style `.dat` files, keyed by title with
 /// region and revision tags removed. Month precision at best.
@@ -58,6 +58,11 @@ impl ReleaseDb {
         }
     }
 
+    /// Adds `other`'s entries; those win over entries already here.
+    pub fn extend(&mut self, other: &ReleaseDb) {
+        self.entries.extend(other.entries.iter().map(|(k, v)| (k.clone(), *v)));
+    }
+
     pub fn lookup(&self, file_stem: &str) -> Option<NaiveDate> {
         let (y, m) = self.entries.get(&title_key(file_stem))?;
         parse_release(&format!("{y}-{m}"))
@@ -92,6 +97,16 @@ mod tests {
             NaiveDate::from_ymd_opt(1991, 1, 1)
         );
         assert_eq!(db.lookup("Unknown Game"), None);
+    }
+
+    #[test]
+    fn libretro_release_year_files_use_comment_and_quoted_years() {
+        let dat = "clrmamepro (\n\tname \"Nintendo - Nintendo Entertainment System\"\n)\n\ngame (\n\tcomment \"10-Yard Fight (Japan)\"\n\treleaseyear \"1985\"\n\trom ( crc 44AA3EEB )\n)\n\ngame (\n\tcomment \"Zelda no Densetsu (Japan)\"\n\treleaseyear \"1986\"\n\treleasemonth \"2\"\n\trom ( crc 1 )\n)\n";
+        let mut db = ReleaseDb::empty();
+        db.add_dat(dat);
+        assert_eq!(db.len(), 2);
+        assert_eq!(db.lookup("10-Yard Fight (U) [!]"), NaiveDate::from_ymd_opt(1985, 1, 1));
+        assert_eq!(db.lookup("Zelda no Densetsu (J)"), NaiveDate::from_ymd_opt(1986, 2, 1));
     }
 
     #[test]

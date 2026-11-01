@@ -39,6 +39,7 @@ fn main() -> ExitCode {
         tracing::error!(error = %e, "cannot list the library");
         return ExitCode::from(1);
     }
+    let dates = artsync::sync_release_dats(&cfg.cache);
     let items = match list_items(&cfg.mediad) {
         Ok(i) => i,
         Err(e) => {
@@ -55,7 +56,7 @@ fn main() -> ExitCode {
         episode_thumbnails = episodes,
         "artsync finished"
     );
-    if s.fetched + episodes > 0
+    if s.fetched + episodes + dates > 0
         && let Err(e) = notify_rescan(&cfg.mediad)
     {
         tracing::warn!(error = %e, "could not ask mediad to rescan; it will pick the artwork up on its next timed scan");

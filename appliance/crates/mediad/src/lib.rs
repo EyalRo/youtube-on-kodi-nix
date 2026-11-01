@@ -50,7 +50,14 @@ impl AppState {
 
     /// Scan the media root and replace the catalog. Blocking: call from `spawn_blocking`.
     pub fn rescan(&self) -> Result<store::ScanStats, StoreError> {
-        let mut scan = scanner::scan_all(&self.media_root, &self.release_db);
+        // artsync keeps libretro's release-year files in the art cache; read them afresh so a
+        // download takes effect on the next scan, with the configured directory winning.
+        let mut dates = ReleaseDb::empty();
+        if let Some(dir) = &self.art_cache {
+            dates.extend(&ReleaseDb::load_dir(&dir.join("releasedb")));
+        }
+        dates.extend(&self.release_db);
+        let mut scan = scanner::scan_all(&self.media_root, &dates);
         if let Some(dir) = &self.art_cache {
             use_art_cache(&mut scan, dir);
         }

@@ -489,6 +489,45 @@ fn lookup(cfg: &Config, listings: &mut std::collections::HashMap<String, Vec<Str
     last_err.map_or(Ok(Found::Nothing), Err)
 }
 
+/// How old a downloaded release-year file may get before it is fetched again.
+const RELEASE_DB_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 3600);
+
+/// Downloads libretro-database's release-year file for each system we have a core for into
+/// `<cache>/releasedb`, where mediad reads them. Returns how many files were written.
+pub fn sync_release_dats(cache: &Path) -> usize {
+    let dir = cache.join("releasedb");
+    let _ = std::fs::create_dir_all(&dir);
+    let mut written = 0;
+    for system in ["nes", "snes", "genesis", "sms", "gamegear", "gb", "gbc", "gba", "n64", "32x"] {
+        let Some(name) = libretro_dir(system) else { continue };
+        let file = dir.join(format!("{name}.dat"));
+        let fresh = std::fs::metadata(&file)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| SystemTime::now().duration_since(t).ok())
+            .is_some_and(|age| age < RELEASE_DB_MAX_AGE);
+        if fresh {
+            continue;
+        }
+        let url = format!(
+            "https://raw.githubusercontent.com/libretro/libretro-database/master/metadat/releaseyear/{}.dat",
+            percent_encode(name)
+        );
+        match fetch(&url, None) {
+            Ok(bytes) if !bytes.is_empty() => {
+                let tmp = dir.join(format!(".{name}.part"));
+                if std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, &file)).is_ok() {
+                    tracing::info!(system, bytes = bytes.len(), "release dates downloaded");
+                    written += 1;
+                }
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(system, error = %e, "release dates download failed"),
+        }
+    }
+    written
+}
+
 pub fn run(cfg: &Config, items: &[Item]) -> Summary {
     let mut sum = Summary::default();
     let items: Vec<&Item> = items.iter().filter(|i| !i.has_art).collect();
