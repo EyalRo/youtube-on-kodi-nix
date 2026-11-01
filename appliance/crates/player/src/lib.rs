@@ -66,6 +66,8 @@ pub struct Config {
     /// Directory of RetroArch's joypad profiles (`retroarch-joypad-autoconfig`). Without it
     /// RetroArch finds a pad but maps none of its buttons ("not configured").
     pub autoconfig_dir: Option<PathBuf>,
+    /// A General MIDI SoundFont (`.sf2`) for DOS games' music. Without one MIDI output is off.
+    pub soundfont: Option<PathBuf>,
     /// The DRM connector and ALSA device of the one TV.
     pub drm_connector: String,
     pub audio_device: String,
@@ -197,10 +199,11 @@ pub fn retroarch_overrides(cfg: &Config, system: Option<&str>) -> String {
 /// Core options forced for a system, in the core's `.opt` format. DOSBox Pure ignores a game's
 /// `dosbox.conf` unless told to read it (old games ship one that slows the emulated PC down to
 /// the speed they were written for, and without it they run far too fast), and it complains about
-/// a missing frontend MIDI device unless MIDI output is off.
-pub fn core_options(system: Option<&str>) -> Option<&'static str> {
+/// a missing frontend MIDI device unless MIDI output is off or a SoundFont (a file name in the
+/// system directory) plays it.
+pub fn core_options(system: Option<&str>, soundfont: Option<&str>) -> Option<String> {
     match system {
-        Some("dos") => Some("dosbox_pure_conf = \"inside\"\ndosbox_pure_midi = \"disabled\"\n"),
+        Some("dos") => Some(format!("dosbox_pure_conf = \"inside\"\ndosbox_pure_midi = \"{}\"\n", soundfont.unwrap_or("disabled"))),
         _ => None,
     }
 }
@@ -348,7 +351,22 @@ fn forward_log(stream: impl std::io::Read + Send + 'static, id: &str) -> std::th
 
 fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
     let mut text = retroarch_overrides(cfg, play.system.as_deref());
-    if let Some(opts) = core_options(play.system.as_deref()) {
+    // DOSBox Pure finds a MIDI SoundFont by file name in the system directory: a private one holding just the font.
+    let font = match (&cfg.soundfont, play.system.as_deref()) {
+        (Some(path), Some("dos")) => path.file_name().map(|n| n.to_string_lossy().into_owned()).map(|name| {
+            let dir = std::env::temp_dir().join(format!("retroarch-system-{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&dir);
+            let link = dir.join(&name);
+            let _ = std::fs::remove_file(&link);
+            if let Err(e) = std::os::unix::fs::symlink(path, &link) {
+                tracing::warn!(error = %e, "cannot link the MIDI SoundFont");
+            }
+            text.push_str(&format!("system_directory = \"{}\"\n", dir.display()));
+            name
+        }),
+        _ => None,
+    };
+    if let Some(opts) = core_options(play.system.as_deref(), font.as_deref()) {
         let file = std::env::temp_dir().join(format!("retroarch-core-options-{}.opt", std::process::id()));
         std::fs::write(&file, opts).map_err(|e| PlayError::Launch(format!("cannot write {}: {e}", file.display())))?;
         text.push_str(&format!("core_options_path = \"{}\"\n", file.display()));
@@ -404,6 +422,7 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         let _ = p.join();
     }
     let _ = std::fs::remove_file(&overrides);
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join(format!("retroarch-system-{}", std::process::id())));
     let _ = std::fs::remove_file(&log_file);
     tracing::info!(id = %play.id, %status, "retroarch exited");
     if !status.success() && !left.load(std::sync::atomic::Ordering::SeqCst) {
@@ -445,6 +464,7 @@ mod tests {
             retroarch: "retroarch".into(),
             core_dir: "/cores".into(),
             autoconfig_dir: Some("/autoconfig".into()),
+            soundfont: None,
             drm_connector: "HDMI-A-1".into(),
             audio_device: "alsa/hdmi:CARD=PCH,DEV=0".into(),
             mpv_extra: vec![],
@@ -511,9 +531,15 @@ mod tests {
 
     #[test]
     fn dos_games_read_their_own_conf_and_have_no_midi_output() {
-        let o = core_options(Some("dos")).unwrap();
+        let o = core_options(Some("dos"), None).unwrap();
         assert!(o.contains("dosbox_pure_conf = \"inside\"") && o.contains("dosbox_pure_midi = \"disabled\""), "{o}");
-        assert_eq!(core_options(Some("nes")), None);
+        assert_eq!(core_options(Some("nes"), None), None);
+    }
+
+    #[test]
+    fn dos_music_plays_through_the_soundfont_when_there_is_one() {
+        let o = core_options(Some("dos"), Some("GeneralUser-GS.sf2")).unwrap();
+        assert!(o.contains("dosbox_pure_midi = \"GeneralUser-GS.sf2\""), "{o}");
     }
 
     #[test]

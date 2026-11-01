@@ -65,6 +65,8 @@ let
     PLAYER_CORE_DIR = "${cfg.retroarch}/lib/retroarch/cores";
     # The pad profiles: without them RetroArch sees a controller but maps none of its buttons.
     PLAYER_AUTOCONFIG_DIR = "${pkgs.retroarch-joypad-autoconfig}/share/libretro/autoconfig";
+    # General MIDI sounds for DOS games' music (DOSBox Pure plays MIDI through a SoundFont).
+    PLAYER_SOUNDFONT = "${pkgs.soundfont-generaluser}/share/soundfonts/GeneralUser-GS.sf2";
   } // lib.optionalAttrs (cfg.mpvExtraArgs != "") {
     PLAYER_MPV_ARGS = cfg.mpvExtraArgs;
   } // lib.optionalAttrs (cfg.victorialogs != null) {
