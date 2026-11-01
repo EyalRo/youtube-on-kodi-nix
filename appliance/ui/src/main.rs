@@ -1129,16 +1129,46 @@ fn main() -> Result<(), slint::PlatformError> {
         let codes: Vec<u32> = text.chars().map(u32::from).collect();
         applog::debug!(?codes, "remote button reached the UI");
     });
-    ui.on_arm(|action| power_event("armed", action.as_str(), "press select again within 3 s to confirm"));
-    ui.on_disarm(|action, why| power_event("cancelled", action.as_str(), why.as_str()));
-    ui.on_power(|action| {
-        power_event("requested", action.as_str(), "confirmed on the remote");
-        let cmd = env_or("UI_POWER_CMD", "systemctl");
-        match Command::new(&cmd).arg(action.as_str()).status() {
-            Ok(s) if s.success() => power_event("accepted", action.as_str(), &format!("{cmd} exited {s}")),
-            Ok(s) => power_event("failed", action.as_str(), &format!("{cmd} exited {s}")),
-            Err(e) => power_event("failed", action.as_str(), &format!("cannot run {cmd}: {e}")),
-        }
+    // Logging a power event writes to the console and waits for the log server, and `systemctl reboot`
+    // waits for the shutdown job: none of it may run on the UI thread, or the screen freezes (once for
+    // a full minute) instead of showing the "Rebooting…" spinner.
+    ui.on_arm(|action| {
+        let action = action.to_string();
+        std::thread::spawn(move || power_event("armed", &action, "press select again within 3 s to confirm"));
+    });
+    ui.on_disarm(|action, why| {
+        let (action, why) = (action.to_string(), why.to_string());
+        std::thread::spawn(move || power_event("cancelled", &action, &why));
+    });
+    let weak = ui.as_weak();
+    ui.on_power(move |action| {
+        let action = action.to_string();
+        let weak = weak.clone();
+        std::thread::spawn(move || {
+            power_event("requested", &action, "confirmed on the remote");
+            let cmd = env_or("UI_POWER_CMD", "systemctl");
+            let accepted = match Command::new(&cmd).arg(&action).status() {
+                Ok(s) if s.success() => {
+                    power_event("accepted", &action, &format!("{cmd} exited {s}"));
+                    true
+                }
+                Ok(s) => {
+                    power_event("failed", &action, &format!("{cmd} exited {s}"));
+                    false
+                }
+                Err(e) => {
+                    power_event("failed", &action, &format!("cannot run {cmd}: {e}"));
+                    false
+                }
+            };
+            // The box is not going down after all: give the screen back.
+            if !accepted {
+                let _ = weak.upgrade_in_event_loop(|ui| {
+                    ui.set_loading(false);
+                    ui.set_loading_text("".into());
+                });
+            }
+        });
     });
 
     ui.on_quit(|| {

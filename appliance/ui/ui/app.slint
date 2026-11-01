@@ -269,6 +269,8 @@ export component App inherits Window {
     // True from choosing a video until the display is handed over: a full-screen spinner that
     // swallows the remote.
     in-out property <bool> loading: false;
+    // Under the spinner: what the box is doing ("Rebooting…" while it goes down).
+    in-out property <string> loading-text;
     property <int> spin: 0;
 
     background: #0e1318;
@@ -417,6 +419,8 @@ export component App inherits Window {
             config();
         } else if (armed == bar-sel) {
             armed = -1;
+            loading-text = bar-sel == 1 ? "Rebooting…" : "Shutting down…";
+            loading = true;
             power(bar-sel == 1 ? "reboot" : "poweroff");
         } else {
             armed = bar-sel;
@@ -1208,6 +1212,15 @@ export component App inherits Window {
             y: root.height / 2 - 10px + 44px * sin(45deg * i);
             background: white;
             opacity: 1.0 - mod(spin - i + 8, 8) * 0.12;
+        }
+        Text {
+            x: 0px;
+            y: root.height / 2 + 100px;
+            width: root.width;
+            text: loading-text;
+            font-size: 34px;
+            color: #aab4bd;
+            horizontal-alignment: center;
         }
     }
 }
