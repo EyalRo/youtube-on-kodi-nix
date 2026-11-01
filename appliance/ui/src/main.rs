@@ -347,6 +347,9 @@ fn load_rows(addr: &str, cache: &Path, live: bool) -> Result<Vec<RowData>, Strin
                 tile_data(it, art)
             })
             .collect();
+        if id.starts_with("games") {
+            mark_years(items, &mut tiles);
+        }
         // A row shows at most MAX_TILES; its last tile opens the whole row as a list.
         if items.len() > MAX_TILES {
             tiles.push(TileData {
@@ -357,6 +360,7 @@ fn load_rows(addr: &str, cache: &Path, live: bool) -> Result<Vec<RowData>, Strin
                 has_art: false,
                 art: Default::default(),
                 viewed: false,
+                year_mark: Default::default(),
             });
         }
         out.push(RowData {
@@ -369,6 +373,25 @@ fn load_rows(addr: &str, cache: &Path, live: bool) -> Result<Vec<RowData>, Strin
     Ok(out)
 }
 
+/// Release year of an item (`date` is `YYYY-MM-DD`), if it has one.
+fn year_of(it: &Value) -> Option<&str> {
+    it["date"].as_str().and_then(|d| d.get(..4)).filter(|y| y.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Games arrive oldest first: mark each tile whose year differs from the one before it, for the separator.
+fn mark_years(items: &[Value], tiles: &mut [TileData]) {
+    let mut prev: Option<&str> = None;
+    for (it, tile) in items.iter().zip(tiles.iter_mut()) {
+        let year = year_of(it);
+        if let (Some(p), Some(y)) = (prev, year) {
+            if p != y {
+                tile.year_mark = y.into();
+            }
+        }
+        prev = year.or(prev);
+    }
+}
+
 fn tile_data(it: &Value, art: Option<Image>) -> TileData {
     TileData {
         id: it["id"].as_str().unwrap_or_default().into(),
@@ -378,6 +401,7 @@ fn tile_data(it: &Value, art: Option<Image>) -> TileData {
         has_art: art.is_some(),
         art: art.unwrap_or_default(),
         viewed: it["viewed"].as_bool().unwrap_or(false),
+        year_mark: Default::default(),
     }
 }
 
@@ -1360,5 +1384,22 @@ mod update_tests {
         std::fs::write(&f, "0.2.3").unwrap();
         assert_eq!(available_upgrade(path, "0.2.4"), "");
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod year_tests {
+    use super::*;
+
+    #[test]
+    fn a_tile_is_marked_where_the_year_changes() {
+        let items: Vec<Value> = [Some("1990-01-01"), Some("1990-06-01"), Some("1991-01-01"), Some("1991-02-02"), Some("1993-01-01"), None]
+            .iter()
+            .map(|d| serde_json::json!({ "id": "x", "title": "t", "date": d }))
+            .collect();
+        let mut tiles: Vec<TileData> = items.iter().map(|it| tile_data(it, None)).collect();
+        mark_years(&items, &mut tiles);
+        let marks: Vec<String> = tiles.iter().map(|t| t.year_mark.to_string()).collect();
+        assert_eq!(marks, ["", "", "1991", "", "1993", ""]);
     }
 }

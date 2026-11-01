@@ -18,6 +18,8 @@ export struct TileData {
     has-art: bool,
     /// Everything in it has been watched.
     viewed: bool,
+    /// A games row sorted by release date: the year this tile starts (the previous tile is an earlier year), else empty.
+    year-mark: string,
 }
 
 export struct RowData {
@@ -738,6 +740,23 @@ export component App inherits Window {
                     width: tile-w;
                     height: row-h - 60px;
                     property <bool> focused: ri == sel-row && ti == sel-col;
+                    // Year boundary: a line centred in the gap between the posters (the slot edge) and the year
+                    // beside its top, both drawn outside the tile so nothing moves.
+                    if t.year-mark != "": Rectangle {
+                        x: -1px;
+                        y: -34px;
+                        width: 2px;
+                        height: 458px;
+                        background: #4a5866;
+                    }
+                    if t.year-mark != "": Text {
+                        x: 10px;
+                        y: -34px;
+                        text: t.year-mark;
+                        font-size: 24px;
+                        font-weight: 700;
+                        color: #ffd54a;
+                    }
                     Poster {
                         x: 12px;
                         y: parent.focused ? 4px : 10px;

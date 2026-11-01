@@ -26,6 +26,7 @@ pub struct RowInfo {
 #[derive(Clone, Copy, PartialEq)]
 enum SortBy {
     Date,
+    OldestDate,
     UnwatchedDate,
 }
 
@@ -85,10 +86,10 @@ fn definitions(items: &[Item]) -> Vec<RowDef> {
         .map(|id| RowDef {
             id: (*id).to_string(),
             label: label_of(id).to_string(),
-            sort: if *id == "unwatched" {
-                SortBy::UnwatchedDate
-            } else {
-                SortBy::Date
+            sort: match *id {
+                "unwatched" => SortBy::UnwatchedDate,
+                "games" => SortBy::OldestDate,
+                _ => SortBy::Date,
             },
         })
         .collect();
@@ -104,7 +105,7 @@ fn definitions(items: &[Item]) -> Vec<RowDef> {
         rows.push(RowDef {
             id: format!("games:{sid}"),
             label: label.to_string(),
-            sort: SortBy::Date,
+            sort: SortBy::OldestDate,
         });
     }
     rows
@@ -120,6 +121,11 @@ pub fn sort_newest(items: &mut [Item], by_unwatched: bool) {
         }
     };
     items.sort_by_cached_key(|i| (key(i).is_none(), Reverse(key(i)), i.title.to_lowercase()));
+}
+
+/// Oldest first by `date` (games: the order they came out); undated last; ties by title.
+pub fn sort_oldest(items: &mut [Item]) {
+    items.sort_by_cached_key(|i| (i.date.is_none(), i.date, i.title.to_lowercase()));
 }
 
 /// Rows with at least one item (Everything always), in display order.
@@ -147,7 +153,10 @@ pub fn build_row(row_id: &str, items: &[Item]) -> Option<Vec<Item>> {
                 .filter(|i| matches(row_id, i))
                 .cloned()
                 .collect();
-            sort_newest(&mut out, def.sort == SortBy::UnwatchedDate);
+            match def.sort {
+                SortBy::OldestDate => sort_oldest(&mut out),
+                other => sort_newest(&mut out, other == SortBy::UnwatchedDate),
+            }
             return Some(out);
         }
     }
@@ -249,7 +258,7 @@ mod tests {
             ["Breaking Bad", "Finished Show", "Empty Show"]
         );
         assert_eq!(titles("channels", &c), ["Some Channel"]);
-        assert_eq!(titles("games", &c), ["Sonic", "Zelda", "No Date"]);
+        assert_eq!(titles("games", &c), ["Zelda", "Sonic", "No Date"]);
         assert_eq!(titles("games:nes", &c), ["Zelda", "No Date"]);
     }
 
