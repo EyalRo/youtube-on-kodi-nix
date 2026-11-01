@@ -201,15 +201,20 @@ pub fn retroarch_overrides(cfg: &Config, system: Option<&str>) -> String {
 /// the speed they were written for, and without it they run far too fast), and it complains about
 /// a missing frontend MIDI device unless MIDI output is off or a SoundFont (a file name in the
 /// system directory) plays it.
-pub fn core_options(system: Option<&str>, soundfont: Option<&str>) -> Option<String> {
-    match system {
-        Some("dos") => Some(match soundfont {
-            // The GM SoundFont renders quietly next to the Sound Blaster's own sound effects.
-            Some(font) => format!("dosbox_pure_conf = \"inside\"\ndosbox_pure_midi = \"{font}\"\ndosbox_pure_volume_midi = \"3.0\"\n"),
-            None => "dosbox_pure_conf = \"inside\"\ndosbox_pure_midi = \"disabled\"\n".to_string(),
-        }),
-        _ => None,
+/// Games whose own `dosbox.conf` slows the PC a little too much for the TV: a multiplier on its cycles.
+const DOS_SPEED_SCALE: &[(&str, &str)] = &[("Digger", "1.2")];
+
+pub fn core_options(system: Option<&str>, soundfont: Option<&str>, title: &str) -> Option<String> {
+    if system != Some("dos") {
+        return None;
     }
+    let scale = DOS_SPEED_SCALE.iter().find(|(t, _)| *t == title).map_or("1.0", |(_, s)| s);
+    // The GM SoundFont renders quietly next to the Sound Blaster's own sound effects.
+    let midi = match soundfont {
+        Some(font) => format!("dosbox_pure_midi = \"{font}\"\ndosbox_pure_volume_midi = \"3.0\"\n"),
+        None => "dosbox_pure_midi = \"disabled\"\n".to_string(),
+    };
+    Some(format!("dosbox_pure_conf = \"inside\"\ndosbox_pure_cycles_scale = \"{scale}\"\n{midi}"))
 }
 
 /// The directory name RetroArch keeps a core's options under (`config/<name>/<name>.opt`).
@@ -408,7 +413,7 @@ fn run_game(cfg: &Config, play: &Play) -> Result<(), PlayError> {
         }),
         _ => None,
     };
-    if let Some(opts) = core_options(play.system.as_deref(), font.as_deref()) {
+    if let Some(opts) = core_options(play.system.as_deref(), font.as_deref(), &play.title) {
         apply_core_options(play.system.as_deref(), &opts)?;
     }
     let overrides = std::env::temp_dir().join(format!("retroarch-overrides-{}.cfg", std::process::id()));
@@ -571,9 +576,9 @@ mod tests {
 
     #[test]
     fn dos_games_read_their_own_conf_and_have_no_midi_output() {
-        let o = core_options(Some("dos"), None).unwrap();
+        let o = core_options(Some("dos"), None, "Lemmings").unwrap();
         assert!(o.contains("dosbox_pure_conf = \"inside\"") && o.contains("dosbox_pure_midi = \"disabled\""), "{o}");
-        assert_eq!(core_options(Some("nes"), None), None);
+        assert_eq!(core_options(Some("nes"), None, ""), None);
     }
 
     #[test]
@@ -585,7 +590,8 @@ mod tests {
 
     #[test]
     fn dos_music_plays_through_the_soundfont_when_there_is_one() {
-        let o = core_options(Some("dos"), Some("GeneralUser-GS.sf2")).unwrap();
+        let o = core_options(Some("dos"), Some("GeneralUser-GS.sf2"), "Digger").unwrap();
+        assert!(o.contains("dosbox_pure_cycles_scale = \"1.2\""), "{o}");
         assert!(o.contains("dosbox_pure_midi = \"GeneralUser-GS.sf2\""), "{o}");
     }
 
