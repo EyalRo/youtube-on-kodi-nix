@@ -202,7 +202,8 @@ pub fn retroarch_overrides(cfg: &Config, system: Option<&str>) -> String {
 /// a missing frontend MIDI device unless MIDI output is off or a SoundFont (a file name in the
 /// system directory) plays it.
 /// Games whose own `dosbox.conf` slows the PC a little too much for the TV: a multiplier on its cycles.
-const DOS_SPEED_SCALE: &[(&str, &str)] = &[("Digger", "1.2")];
+/// DOSBox Pure only takes 5% steps (0.20-2.00), so a value outside them falls back to 1.0.
+const DOS_SPEED_SCALE: &[(&str, &str)] = &[("Digger", "1.45")];
 
 pub fn core_options(system: Option<&str>, soundfont: Option<&str>, title: &str) -> Option<String> {
     if system != Some("dos") {
@@ -591,7 +592,7 @@ mod tests {
     #[test]
     fn dos_music_plays_through_the_soundfont_when_there_is_one() {
         let o = core_options(Some("dos"), Some("GeneralUser-GS.sf2"), "Digger").unwrap();
-        assert!(o.contains("dosbox_pure_cycles_scale = \"1.2\""), "{o}");
+        assert!(o.contains("dosbox_pure_cycles_scale = \"1.45\""), "{o}");
         assert!(o.contains("dosbox_pure_midi = \"GeneralUser-GS.sf2\""), "{o}");
     }
 
