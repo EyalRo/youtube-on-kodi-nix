@@ -204,6 +204,11 @@ pub fn display_title(filename: &str) -> String {
     }
 }
 
+/// The name without region/revision tags.
+pub(crate) fn strip_tags(name: &str) -> String {
+    TAGS.replace_all(name, "").into_owned()
+}
+
 /// Lookup key for release databases: tags stripped, letters and digits only.
 pub fn title_key(name: &str) -> String {
     squash(&TAGS.replace_all(name, ""))

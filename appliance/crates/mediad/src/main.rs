@@ -19,6 +19,31 @@ fn secs_env(name: &str, default: u64) -> u64 {
     }
 }
 
+/// The built-in game lists, overridden/extended by the JSON file in `MEDIAD_GAME_LISTS` if set.
+/// A missing or invalid file is logged and the built-ins are used.
+fn load_game_lists() -> catalog::GameLists {
+    let lists = catalog::GameLists::builtin();
+    let Ok(file) = std::env::var("MEDIAD_GAME_LISTS") else {
+        return lists;
+    };
+    if file.is_empty() {
+        return lists;
+    }
+    let loaded = std::fs::read_to_string(&file)
+        .map_err(|e| e.to_string())
+        .and_then(|t| catalog::GameLists::from_json(&t).map_err(|e| e.to_string()));
+    match loaded {
+        Ok(user) => {
+            tracing::info!(file, "loaded user game lists");
+            lists.merged_with(user)
+        }
+        Err(e) => {
+            tracing::error!(file, error = %e, "cannot load game lists; using the built-in ones");
+            lists
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     applog::init("mediad", "MEDIAD_LOG");
@@ -58,6 +83,7 @@ async fn main() {
     {
         state = state.with_channels_file(PathBuf::from(file));
     }
+    state = state.with_game_lists(load_game_lists());
     if let Ok(dir) = std::env::var("MEDIAD_ART_CACHE")
         && !dir.is_empty()
     {

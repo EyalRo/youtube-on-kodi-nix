@@ -1,0 +1,119 @@
+[
+  {
+    "id": "canon-nes",
+    "label": "NES canon",
+    "system": "nes",
+    "ranked": true,
+    "titles": [
+      "Super Mario Bros.",
+      "The Legend of Zelda",
+      "Super Mario Bros. 3",
+      "Metroid",
+      "Mega Man 2",
+      "Castlevania",
+      "Contra",
+      "Mike Tyson's Punch-Out!!",
+      ["Kirby's Adventure"],
+      ["Ninja Gaiden", "Ninja Gaiden (Shadow Warriors)"],
+      "Castlevania III: Dracula's Curse",
+      "Mega Man 3",
+      ["Teenage Mutant Ninja Turtles II: The Arcade Game", "Teenage Mutant Hero Turtles II: The Arcade Game"],
+      ["Disney's DuckTales", "DuckTales"],
+      ["Dragon Warrior III", "Dragon Quest III"]
+    ]
+  },
+  {
+    "id": "canon-snes",
+    "label": "SNES canon",
+    "system": "snes",
+    "ranked": true,
+    "titles": [
+      "Super Metroid",
+      "The Legend of Zelda: A Link to the Past",
+      "Super Mario World",
+      "Chrono Trigger",
+      ["Final Fantasy III", "Final Fantasy VI"],
+      ["Super Mario World 2: Yoshi's Island", "Yoshi's Island"],
+      ["EarthBound", "Mother 2"],
+      "Super Mario RPG: Legend of the Seven Stars",
+      "Donkey Kong Country 2: Diddy's Kong Quest",
+      ["Secret of Mana", "Seiken Densetsu 2"],
+      "Mega Man X",
+      ["Super Mario Kart"],
+      ["Star Fox", "Starwing"],
+      ["Contra III: The Alien Wars", "Contra Spirits"],
+      ["Super Castlevania IV", "Akumajou Dracula"]
+    ]
+  },
+  {
+    "id": "canon-psx",
+    "label": "PlayStation canon",
+    "system": "psx",
+    "ranked": true,
+    "titles": [
+      "Final Fantasy VII",
+      "Metal Gear Solid",
+      "Castlevania: Symphony of the Night",
+      "Resident Evil 2",
+      "Final Fantasy Tactics",
+      "Silent Hill",
+      "Suikoden II",
+      "Gran Turismo",
+      "Tony Hawk's Pro Skater 2",
+      "Crash Bandicoot 2: Cortex Strikes Back",
+      "Xenogears",
+      "Chrono Cross",
+      "Final Fantasy IX",
+      "Tomb Raider",
+      "Crash Team Racing"
+    ]
+  },
+  {
+    "id": "canon-sms",
+    "label": "Master System canon",
+    "system": "sms",
+    "ranked": true,
+    "titles": [
+      "Phantasy Star",
+      "Wonder Boy III: The Dragon's Trap",
+      "Alex Kidd in Miracle World",
+      "Sonic the Hedgehog 2",
+      "Sonic the Hedgehog",
+      "Fantasy Zone",
+      "Golden Axe Warrior",
+      "Wonder Boy in Monster Land",
+      "R-Type",
+      "Ultima IV: Quest of the Avatar"
+    ]
+  },
+  {
+    "id": "canon-genesis",
+    "label": "Genesis canon",
+    "system": "genesis",
+    "ranked": true,
+    "titles": [
+      "Sonic the Hedgehog 2",
+      "Streets of Rage 2",
+      "Gunstar Heroes",
+      "Phantasy Star IV: The End of the Millennium",
+      "Sonic the Hedgehog",
+      "Sonic the Hedgehog 3",
+      "Shinobi III: Return of the Ninja Master",
+      "Contra: Hard Corps",
+      "Shining Force II",
+      "Comix Zone",
+      "Castlevania: Bloodlines",
+      ["Ecco the Dolphin"],
+      "Golden Axe",
+      ["Disney's Aladdin", "Aladdin"],
+      "ToeJam & Earl"
+    ]
+  },
+  { "id": "castlevania", "label": "Castlevania series", "contains": ["castlevania", "akumajou", "draculax"] },
+  { "id": "zelda", "label": "Zelda series", "contains": ["zelda"] },
+  { "id": "mario", "label": "Mario series", "contains": ["mario"] },
+  { "id": "metroid", "label": "Metroid series", "contains": ["metroid"] },
+  { "id": "mega-man", "label": "Mega Man series", "contains": ["megaman", "rockman"] },
+  { "id": "sonic", "label": "Sonic series", "contains": ["sonicthehedgehog", "sonic3", "sonicknuckles", "sonicchaos", "sonicspinball"] },
+  { "id": "final-fantasy", "label": "Final Fantasy series", "contains": ["finalfantasy"] }
+]

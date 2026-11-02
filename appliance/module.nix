@@ -68,6 +68,12 @@ in
       description = "Directory of libretro .dat files, used for game release dates.";
     };
 
+    gameListsFile = mkOption {
+      type = types.nullOr types.path;
+      default = null;
+      description = "JSON file of game lists that extend or replace the built-in ones (same `id` replaces; a list with no titles/contains removes it). Each non-empty list becomes a home row.";
+    };
+
     logLevel = mkOption {
       type = types.str;
       default = "info";
@@ -222,6 +228,9 @@ in
       } // vlogsEnv
       // lib.optionalAttrs (cfg.releaseDbDir != null) {
         MEDIAD_RELEASE_DB = toString cfg.releaseDbDir;
+      }
+      // lib.optionalAttrs (cfg.gameListsFile != null) {
+        MEDIAD_GAME_LISTS = toString cfg.gameListsFile;
       }
       // lib.optionalAttrs ytsyncEnabled {
         # The settings page follows and unfollows channels through mediad, which can write the list.

@@ -5,6 +5,7 @@
 
 mod date;
 mod item;
+mod lists;
 mod neogeo;
 mod rows;
 mod systems;
@@ -12,7 +13,10 @@ mod systems;
 pub use date::parse_release;
 pub use neogeo::{neogeo_full_name, neogeo_title, neogeo_year};
 pub use item::{DateSource, Episode, Item, Kind, MediaEntry};
-pub use rows::{FIXED_ROW_IDS, RowInfo, build_row, list_rows, sort_newest};
+pub use lists::{GameList, GameLists};
+pub use rows::{
+    FIXED_ROW_IDS, RowInfo, build_row, build_row_with, list_rows, list_rows_with, sort_newest,
+};
 pub use systems::{
     SYSTEMS, System, display_title, tosec, system_by_id, system_for, system_for_folder, title_key,
 };

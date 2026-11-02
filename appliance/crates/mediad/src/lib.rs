@@ -25,6 +25,8 @@ pub struct AppState {
     art_cache: Option<Arc<PathBuf>>,
     /// The followed-YouTube-channels file `ytsync` reads; the settings page edits it through here.
     channels_file: Option<Arc<PathBuf>>,
+    /// Curated game lists (built-ins plus the user's file); each becomes a `list:<id>` row.
+    game_lists: Arc<catalog::GameLists>,
 }
 
 impl AppState {
@@ -35,7 +37,14 @@ impl AppState {
             release_db: Arc::new(release_db),
             art_cache: None,
             channels_file: None,
+            game_lists: Arc::new(catalog::GameLists::builtin()),
         }
+    }
+
+    /// Replace the game lists served as `list:<id>` rows.
+    pub fn with_game_lists(mut self, lists: catalog::GameLists) -> Self {
+        self.game_lists = Arc::new(lists);
+        self
     }
 
     pub fn with_channels_file(mut self, file: PathBuf) -> Self {
@@ -220,12 +229,12 @@ async fn health(State(s): State<AppState>) -> ApiResult<Json<Value>> {
 
 async fn rows(State(s): State<AppState>) -> ApiResult<Json<Value>> {
     let items = s.store.lock().expect("store lock poisoned").items()?;
-    Ok(Json(json!({ "rows": catalog::list_rows(&items) })))
+    Ok(Json(json!({ "rows": catalog::list_rows_with(&items, &s.game_lists) })))
 }
 
 async fn row(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let items = s.store.lock().expect("store lock poisoned").items()?;
-    let items = catalog::build_row(&id, &items).ok_or_else(|| not_found("row"))?;
+    let items = catalog::build_row_with(&id, &items, &s.game_lists).ok_or_else(|| not_found("row"))?;
     Ok(Json(json!({ "id": id, "items": items })))
 }
 

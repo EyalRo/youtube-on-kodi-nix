@@ -367,3 +367,31 @@ async fn channels_need_a_configured_file() {
     let (st, _) = call(&app(dir.path()), "GET", "/youtube/channels", None).await;
     assert_eq!(st, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn game_lists_are_rows_and_a_user_file_can_extend_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = dir.path();
+    write(r, "roms/nes/Super Mario Bros. (World).nes", "x");
+    write(r, "roms/nes/Legend of Zelda, The (USA).nes", "x");
+    write(r, "roms/nes/Castlevania (USA).nes", "x");
+    write(r, "roms/nes/Tetris (USA).nes", "x");
+    let state = AppState::new(Store::open_in_memory().unwrap(), r.to_path_buf(), ReleaseDb::empty());
+    state.rescan().unwrap();
+    let app = router(state.clone());
+
+    let (_, rows) = json_of(&app, "GET", "/rows", None).await;
+    let list = |id: &str| rows["rows"].as_array().unwrap().iter().find(|x| x["id"] == id).cloned();
+    assert_eq!(list("list:canon-nes").unwrap()["count"], 3);
+    assert!(list("list:canon-snes").is_none(), "no SNES games, no row");
+    let (s, v) = json_of(&app, "GET", "/rows/list:canon-nes", None).await;
+    assert_eq!(s, StatusCode::OK);
+    let titles: Vec<_> = v["items"].as_array().unwrap().iter().map(|i| i["title"].as_str().unwrap().to_string()).collect();
+    assert_eq!(titles, ["Super Mario Bros.", "Legend of Zelda, The", "Castlevania"]);
+
+    let user = catalog::GameLists::from_json(r#"[{"id":"puzzle","label":"Puzzlers","titles":["Tetris"]}]"#).unwrap();
+    let app = router(state.with_game_lists(catalog::GameLists::builtin().merged_with(user)));
+    let (_, v) = json_of(&app, "GET", "/rows/list:puzzle", None).await;
+    assert_eq!(v["items"][0]["title"], "Tetris");
+    assert_eq!(json_of(&app, "GET", "/rows/list:nope", None).await.0, StatusCode::NOT_FOUND);
+}

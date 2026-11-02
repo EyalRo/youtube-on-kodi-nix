@@ -3,7 +3,10 @@ use std::cmp::Reverse;
 use chrono::NaiveDate;
 use serde::Serialize;
 
+use std::sync::LazyLock;
+
 use crate::item::{Item, Kind};
+use crate::lists::GameLists;
 use crate::systems::{SYSTEMS, system_by_id};
 
 /// The rows that always exist, in display order.
@@ -128,9 +131,36 @@ pub fn sort_oldest(items: &mut [Item]) {
     items.sort_by_cached_key(|i| (i.date.is_none(), i.date, i.title.to_lowercase()));
 }
 
-/// Rows with at least one item (Everything always), in display order.
+static BUILTIN_LISTS: LazyLock<GameLists> = LazyLock::new(GameLists::builtin);
+
+/// Row id of a curated game list (`list:canon-nes`).
+const LIST_PREFIX: &str = "list:";
+
+/// The playable games of a list, in list order (ranked) or release order.
+fn list_items(list: &crate::lists::GameList, items: &[Item]) -> Vec<Item> {
+    let mut ranked: Vec<(usize, Item)> = items
+        .iter()
+        .filter(|i| playable_game(i))
+        .filter_map(|i| list.rank_of(i).map(|r| (r, i.clone())))
+        .collect();
+    if list.ranked {
+        ranked.sort_by_cached_key(|(r, i)| (*r, i.title.to_lowercase()));
+        ranked.into_iter().map(|(_, i)| i).collect()
+    } else {
+        let mut out: Vec<Item> = ranked.into_iter().map(|(_, i)| i).collect();
+        sort_oldest(&mut out);
+        out
+    }
+}
+
+/// Rows with at least one item (Everything always), in display order, with the
+/// built-in game lists after the per-system rows.
 pub fn list_rows(items: &[Item]) -> Vec<RowInfo> {
-    definitions(items)
+    list_rows_with(items, &BUILTIN_LISTS)
+}
+
+pub fn list_rows_with(items: &[Item], lists: &GameLists) -> Vec<RowInfo> {
+    let mut rows: Vec<RowInfo> = definitions(items)
         .into_iter()
         .filter_map(|def| {
             let count = items.iter().filter(|i| matches(&def.id, i)).count();
@@ -140,12 +170,28 @@ pub fn list_rows(items: &[Item]) -> Vec<RowInfo> {
                 count,
             })
         })
-        .collect()
+        .collect();
+    rows.extend(lists.iter().filter_map(|l| {
+        let count = list_items(l, items).len();
+        (count > 0).then(|| RowInfo {
+            id: format!("{LIST_PREFIX}{}", l.id),
+            label: l.label.clone(),
+            count,
+        })
+    }));
+    rows
 }
 
 /// The items of one row in display order. Unknown rows are `None`; a supported
 /// game system without games is an empty row, not an error.
 pub fn build_row(row_id: &str, items: &[Item]) -> Option<Vec<Item>> {
+    build_row_with(row_id, items, &BUILTIN_LISTS)
+}
+
+pub fn build_row_with(row_id: &str, items: &[Item], lists: &GameLists) -> Option<Vec<Item>> {
+    if let Some(id) = row_id.strip_prefix(LIST_PREFIX) {
+        return lists.get(id).map(|l| list_items(l, items));
+    }
     for def in definitions(items) {
         if def.id == row_id {
             let mut out: Vec<Item> = items
@@ -290,6 +336,7 @@ mod tests {
     #[test]
     fn one_games_row_per_system_present_ordered_by_name() {
         let ids: Vec<String> = list_rows(&catalog()).into_iter().map(|r| r.id).collect();
+        let ids: Vec<&String> = ids.iter().filter(|i| !i.starts_with("list:")).collect();
         assert_eq!(
             &ids[ids.len() - 3..],
             ["games", "games:genesis", "games:nes"]
@@ -346,5 +393,37 @@ mod tests {
         }
         let games: Vec<Item> = build_row("games", &c).unwrap();
         assert_eq!(games.len(), 3, "all three games are playable");
+    }
+
+    #[test]
+    fn canon_list_is_ranked_and_series_list_is_by_release() {
+        let c = vec![
+            game("Super Mario Bros. 3", "nes", d(1988, 10, 23)),
+            game("Super Mario Bros.", "nes", d(1985, 9, 13)),
+            game("Legend of Zelda, The (USA)", "nes", d(1986, 2, 21)),
+            game("Tetris", "nes", d(1989, 1, 1)),
+            game("Super Mario Bros.", "snes", d(1993, 1, 1)),
+            game("Castlevania III: Dracula's Curse", "nes", d(1990, 9, 28)),
+            game("Castlevania", "nes", d(1986, 9, 26)),
+        ];
+        assert_eq!(
+            titles("list:canon-nes", &c),
+            [
+                "Super Mario Bros.",
+                "Legend of Zelda, The (USA)",
+                "Super Mario Bros. 3",
+                "Castlevania",
+                "Castlevania III: Dracula's Curse"
+            ]
+        );
+        assert_eq!(
+            titles("list:castlevania", &c),
+            ["Castlevania", "Castlevania III: Dracula's Curse"]
+        );
+        let rows = list_rows(&c);
+        let count = |id: &str| rows.iter().find(|r| r.id == id).map(|r| r.count);
+        assert_eq!(count("list:canon-nes"), Some(5));
+        assert_eq!(count("list:canon-snes"), None, "lists with no games are hidden");
+        assert!(build_row("list:nope", &c).is_none());
     }
 }
