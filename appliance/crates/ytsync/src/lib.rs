@@ -92,10 +92,17 @@ pub fn ytdlp_args(cfg: &Config, job: &Job) -> Vec<String> {
         format!("bv*[height<={h}][vcodec^=avc1][fps<=30]+ba[ext=m4a]/bv*[height<={h}][vcodec^=avc1]+ba[ext=m4a]/bv*[height<={h}]+ba/b[height<={h}]"),
         "--max-filesize".into(),
         cfg.max_filesize.clone(),
-        "--playlist-end".into(),
-        cfg.max_per_channel.to_string(),
-        "--dateafter".into(),
-        format!("today-{}days", cfg.max_age_days),
+    ]);
+    // A single video is fetched whatever its age; the per-channel limits only apply to channel pages.
+    if !job.url.contains("/watch?v=") {
+        a.extend([
+            "--playlist-end".into(),
+            cfg.max_per_channel.to_string(),
+            "--dateafter".into(),
+            format!("today-{}days", cfg.max_age_days),
+        ]);
+    }
+    a.extend([
         "--download-archive".into(),
         job.archive.display().to_string(),
         "-o".into(),
@@ -531,6 +538,14 @@ mod tests {
         assert!(a.contains("--max-filesize 3G") && a.contains("vcodec^=avc1"));
         let p = poster_args(&job).join(" ");
         assert!(p.contains("--playlist-items 0") && p.contains("pl_thumbnail:/w/channel") && p.ends_with(" U"));
+    }
+
+    #[test]
+    fn single_video_ignores_age_and_playlist_limits() {
+        let c = cfg(Path::new("/m"), Path::new("/s"));
+        let job = |u: &str| Job { url: u.into(), work_dir: "/w".into(), archive: "/s/archive.txt".into() };
+        let v = ytdlp_args(&c, &job("https://www.youtube.com/watch?v=lyUSfI8AWYY")).join(" ");
+        assert!(!v.contains("--dateafter") && !v.contains("--playlist-end") && v.contains("--download-archive"));
     }
 
     #[test]
