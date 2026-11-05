@@ -57,6 +57,26 @@ fn videos_url(query: &str) -> Option<String> {
     None
 }
 
+/// A single YouTube video (`watch?v=ID`, `youtu.be/ID`, `/shorts/ID`, `/live/ID`) as the canonical
+/// watch URL, or `None` if `entry` is not one. Used by `ytsync now` to fetch one video outright.
+pub fn video_url(entry: &str) -> Option<String> {
+    let q = entry.trim();
+    let rest = q.strip_prefix("https://").or_else(|| q.strip_prefix("http://"))?;
+    let rest = rest.strip_prefix("www.").or_else(|| rest.strip_prefix("m.")).unwrap_or(rest);
+    let id = if let Some(p) = rest.strip_prefix("youtu.be/") {
+        p.split(['?', '#', '/']).next()
+    } else if let Some(p) = rest.strip_prefix("youtube.com/watch?") {
+        p.split(['#']).next()?.split('&').find_map(|kv| kv.strip_prefix("v="))
+    } else {
+        ["youtube.com/shorts/", "youtube.com/live/"]
+            .iter()
+            .find_map(|k| rest.strip_prefix(k))
+            .and_then(|p| p.split(['?', '#', '/']).next())
+    }?;
+    (id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .then(|| format!("https://www.youtube.com/watch?v={id}"))
+}
+
 /// Parse the file's text. Duplicates (same target, compared case-insensitively) keep the first.
 pub fn parse(text: &str) -> Parsed {
     let mut out = Parsed::default();
@@ -146,6 +166,21 @@ pub fn unfollow(text: &str, what: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn video_urls() {
+        let want = Some("https://www.youtube.com/watch?v=lyUSfI8AWYY".to_string());
+        for u in [
+            "https://www.youtube.com/watch?v=lyUSfI8AWYY",
+            "https://youtube.com/watch?feature=x&v=lyUSfI8AWYY&t=3",
+            "https://youtu.be/lyUSfI8AWYY?si=abc",
+            "https://www.youtube.com/shorts/lyUSfI8AWYY",
+        ] {
+            assert_eq!(super::video_url(u), want, "{u}");
+        }
+        assert_eq!(super::video_url("https://www.youtube.com/@DrIncompetent"), None);
+        assert_eq!(super::video_url("@DrIncompetent"), None);
+    }
+
     use super::*;
 
     #[test]

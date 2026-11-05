@@ -117,9 +117,16 @@ fn main() -> ExitCode {
     if now {
         cfg.max_channels = 0;
     }
-    let parsed = channels::parse(&text);
+    let mut parsed = channels::parse(&text);
+    // `ytsync now <video URL>` fetches that one video (any age) into its channel's folder.
+    if now && let Some(url) = channels::video_url(&text) {
+        parsed = channels::Parsed {
+            channels: vec![channels::Channel { url, name: None }],
+            skipped: vec![],
+        };
+    }
     if now && parsed.channels.is_empty() {
-        eprintln!("usage: ytsync now <@handle|url|UC-id>");
+        eprintln!("usage: ytsync now <@handle|channel url|UC-id|video url>");
         return ExitCode::from(2);
     }
     for s in &parsed.skipped {

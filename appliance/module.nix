@@ -244,8 +244,8 @@ in
 
     environment.systemPackages = lib.optional ytsyncEnabled (pkgs.writeShellScriptBin "ytsync-now" ''
       # Download one channel now (followed or not), as the service user with its hardening:
-      #   ytsync-now @handle
-      [ -n "$1" ] || { echo "usage: ytsync-now <@handle|url|UC-id>" >&2; exit 2; }
+      #   ytsync-now @handle   (or a single video URL, to backfill it)
+      [ -n "$1" ] || { echo "usage: ytsync-now <@handle|channel url|UC-id|video url>" >&2; exit 2; }
       systemctl set-environment YTSYNC_NOW="$1"
       systemctl start ytsync; rc=$?
       systemctl unset-environment YTSYNC_NOW
