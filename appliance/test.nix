@@ -76,7 +76,10 @@ pkgs.testers.runNixOSTest {
         eps = detail["episodes"]
         assert len(eps) == 1 and eps[0]["title"] == "Fake Upload" and eps[0]["aired"] == "2024-06-02", eps
 
-    with subtest("the service user cannot write elsewhere in the library"):
-        machine.fail("systemd-run --wait -p User=mediad -p ProtectSystem=strict -p ReadWritePaths=/media/youtube touch /media/movies-x")
+    with subtest("the service user cannot write to the library"):
+        # Writable at the filesystem level, so only the unit sandbox can stop the write.
+        machine.succeed("chown mediad:mediad /media/youtube")
+        machine.succeed("sudo -u mediad touch /media/youtube/plain-write-ok && rm /media/youtube/plain-write-ok")
+        machine.fail("systemd-run --wait -p User=mediad -p ProtectSystem=strict -p ReadOnlyPaths=/media touch /media/youtube/x")
   '';
 }

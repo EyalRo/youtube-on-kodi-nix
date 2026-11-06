@@ -200,7 +200,7 @@ export component App inherits Window {
     callback arm(string);
     callback disarm(string, string);
     callback config();
-    // Ask the back end to look for new videos now (the hourly timer does it otherwise).
+    // Ask mediad to rescan the library now (it otherwise rescans every MEDIAD_RESCAN_SECS).
     callback sync();
     // The show or channel page: season tabs (detail-focus 0) over the episodes of one season (1).
     in property <bool> detail;

@@ -1120,6 +1120,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let mediad = mediad.clone();
             std::thread::spawn(move || match post_json(&mediad, "/rescan", &serde_json::json!({})) {
                 Ok(()) => tracing::info!("sync requested from the top bar (library rescan)"),
+                Err(e) if e.contains("timed out") || e.contains("temporarily unavailable") => {
+                    tracing::warn!(error = %e, "no reply within 10 s; the rescan may still be running")
+                }
                 Err(e) => tracing::error!(error = %e, "sync request failed: mediad did not accept the rescan"),
             });
         }

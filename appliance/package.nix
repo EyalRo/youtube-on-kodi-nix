@@ -29,9 +29,9 @@ version = "0.6.0";
   # Read by the NixOS module (updateCheck checks every 5 minutes on a debug build).
   passthru.debug = debug;
 
-  # Builds the whole workspace, runs its tests, installs the two binaries.
+  # Builds the whole workspace, runs its tests, installs the binaries.
   meta = {
-    description = "Media appliance back end: library daemon and YouTube download job";
+    description = "Media appliance back end: library daemon and artwork job";
     license = lib.licenses.gpl2Plus;
     mainProgram = "mediad";
   };

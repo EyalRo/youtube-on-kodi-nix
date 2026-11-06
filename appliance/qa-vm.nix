@@ -14,7 +14,7 @@
   boot.initrd.kernelModules = [ "virtio_gpu" ];
   virtualisation.memorySize = 2048;
   virtualisation.cores = 2;
-  # Downloaded videos are staged on the VM disk before they go to the NAS, and the poster cache lives here.
+  # The poster (art) cache and mediad's database live on the VM disk.
   virtualisation.diskSize = 8192;
   virtualisation.qemu.options = [
     "-vga none"
