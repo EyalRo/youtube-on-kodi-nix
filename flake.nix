@@ -163,7 +163,7 @@
 
       nixosModules.default = import ./module.nix;
 
-      # Media appliance back end (mediad + ytsync). Set `services.media-appliance.package`
+      # Media appliance back end (mediad). Set `services.media-appliance.package`
       # to `youtube-on-kodi.packages.<system>.appliance`.
       nixosModules.appliance = import ./appliance/module.nix;
 

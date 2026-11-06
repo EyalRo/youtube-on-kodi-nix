@@ -56,7 +56,7 @@ jobs:
         run: |
           d=dist/appliance
           mkdir -p $d/backend/bin $d/ui/bin
-          for b in mediad ytsync artsync kodi-import play; do
+          for b in mediad artsync kodi-import play; do
             install -m755 appliance/target/release/$b $d/backend/bin/
           done
           for b in appliance-ui fbsplash; do

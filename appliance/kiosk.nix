@@ -1,6 +1,6 @@
 # The living-room front end on real hardware: the UI (Slint on DRM/KMS) on tty1 under its own
 # user and logind session, the way a Kodi box runs Kodi. Pairs with `nixosModules.appliance`
-# (mediad, ytsync, artsync), which it expects on the same machine.
+# (mediad, artsync), which it expects on the same machine.
 { config, lib, pkgs, ... }:
 
 let
@@ -9,8 +9,7 @@ let
   inherit (lib) mkEnableOption mkOption mkIf types;
   # Units the UI user may start without a password (see the polkit rule below).
   polkitUnits =
-    lib.optional backend.ytsync.enable "ytsync.service"
-    ++ lib.optional backend.updateCheck.enable "appliance-update-check.service"
+    lib.optional backend.updateCheck.enable "appliance-update-check.service"
     ++ lib.optional (backend.updateCheck.enable && backend.updateCheck.install.flake != null) "appliance-upgrade.service";
 
   # The Plymouth theme: the logo centred on the UI's background colour.
@@ -262,8 +261,7 @@ in
       };
     };
 
-    # The top bar's sync button starts the download job (`systemctl start --no-block ytsync.service`),
-    # and the settings page starts the version check and the upgrade, as the UI user, which polkit
+    # The settings page starts the version check and the upgrade, as the UI user, which polkit
     # refuses unless told otherwise. Only the start verb, only on those units.
     security.polkit = mkIf (polkitUnits != [ ]) {
       enable = true;

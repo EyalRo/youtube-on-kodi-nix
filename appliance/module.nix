@@ -1,11 +1,10 @@
-# NixOS module for the media appliance back end: `mediad` (library daemon) and
-# `ytsync` (timer-driven YouTube download job).
+# NixOS module for the media appliance back end: `mediad` (library daemon) and the
+# optional `artsync` artwork job.
 { config, lib, pkgs, ... }:
 
 let
   cfg = config.services.media-appliance;
   inherit (lib) mkEnableOption mkOption mkIf types;
-  ytsyncEnabled = cfg.ytsync.enable;
   debugBuild = cfg.package.debug or false;
   # `VLOGS` is read by applog (the shared logging library) to push structured JSON to
   # VictoriaLogs; unset disables the push and leaves the journal as the only sink.
@@ -17,13 +16,13 @@ in
 
     package = mkOption {
       type = types.package;
-      description = "Package providing the mediad and ytsync binaries.";
+      description = "Package providing the mediad and artsync binaries.";
     };
 
     user = mkOption {
       type = types.str;
       default = "mediad";
-      description = "User the services run as. Needs read access to the library, and write access to the youtube folder if ytsync is enabled.";
+      description = "User the services run as. Needs read access to the library.";
     };
 
     group = mkOption {
@@ -59,7 +58,7 @@ in
       type = types.nullOr types.str;
       default = null;
       example = "192.168.0.39:9428";
-      description = "VictoriaLogs host:port. When set, mediad, ytsync and artsync push their logs there as structured JSON (service/host/level/fields queryable).";
+      description = "VictoriaLogs host:port. When set, mediad and artsync push their logs there as structured JSON (service/host/level/fields queryable).";
     };
 
     releaseDbDir = mkOption {
@@ -145,53 +144,6 @@ in
         description = "Lookups per run; 0 means all.";
       };
     };
-
-    ytsync = {
-      enable = mkEnableOption "the YouTube download job";
-
-      channelsFile = mkOption {
-        type = types.path;
-        default = "/persist/ytsync/channels.conf";
-        description = "Followed channels, one per line: @handle, channel URL or UC... id, optional `| name`.";
-      };
-
-      seedChannels = mkOption {
-        type = types.nullOr types.path;
-        default = null;
-        description = "Channels file to copy to channelsFile when that file does not exist yet (never overwrites an edited list).";
-      };
-
-      stateDir = mkOption {
-        type = types.path;
-        default = "/persist/ytsync";
-        description = "Download archive and work directory (local disk, persisted).";
-      };
-
-      schedule = mkOption {
-        type = types.str;
-        default = "*-*-* 04:00:00";
-        description = "systemd OnCalendar expression.";
-      };
-
-      maxFilesize = mkOption {
-        type = types.str;
-        default = "3G";
-        description = "yt-dlp --max-filesize: videos known to be bigger are skipped.";
-      };
-      playerClients = mkOption {
-        type = types.str;
-        default = "mweb,tv_simply,web_embedded";
-        description = "yt-dlp YouTube player clients (comma separated). yt-dlp's own default currently gets HTTP 403 on video data; these download. Empty keeps yt-dlp's choice.";
-      };
-      maxPerChannel = mkOption { type = types.ints.positive; default = 5; };
-      maxAgeDays = mkOption { type = types.ints.positive; default = 30; };
-      maxHeight = mkOption { type = types.ints.positive; default = 1080; };
-      maxChannels = mkOption {
-        type = types.ints.unsigned;
-        default = 0;
-        description = "Channels per run; 0 means all. Use 1 for a first live test.";
-      };
-    };
   };
 
   config = mkIf cfg.enable {
@@ -202,10 +154,7 @@ in
 
     systemd.tmpfiles.rules =
       [ "d ${cfg.stateDir} 0750 ${cfg.user} ${cfg.group} -" ]
-      ++ [ "d ${cfg.stateDir}/art 0750 ${cfg.user} ${cfg.group} -" ]
-      ++ lib.optional ytsyncEnabled "d ${cfg.ytsync.stateDir} 0750 ${cfg.user} ${cfg.group} -"
-      ++ lib.optional (ytsyncEnabled && cfg.ytsync.seedChannels != null)
-        "C ${cfg.ytsync.channelsFile} 0640 ${cfg.user} ${cfg.group} - ${cfg.ytsync.seedChannels}";
+      ++ [ "d ${cfg.stateDir}/art 0750 ${cfg.user} ${cfg.group} -" ];
 
     systemd.services.mediad = {
       description = "Media appliance library daemon";
@@ -222,10 +171,6 @@ in
       } // vlogsEnv
       // lib.optionalAttrs (cfg.releaseDbDir != null) {
         MEDIAD_RELEASE_DB = toString cfg.releaseDbDir;
-      }
-      // lib.optionalAttrs ytsyncEnabled {
-        # The settings page follows and unfollows channels through mediad, which can write the list.
-        MEDIAD_YTSYNC_CHANNELS = toString cfg.ytsync.channelsFile;
       };
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/mediad";
@@ -237,54 +182,8 @@ in
         ProtectHome = true;
         PrivateTmp = true;
         NoNewPrivileges = true;
-        ReadWritePaths = [ cfg.stateDir ] ++ lib.optional ytsyncEnabled cfg.ytsync.stateDir;
+        ReadWritePaths = [ cfg.stateDir ];
         ReadOnlyPaths = [ cfg.mediaRoot ];
-      };
-    };
-
-    environment.systemPackages = lib.optional ytsyncEnabled (pkgs.writeShellScriptBin "ytsync-now" ''
-      # Download one channel now (followed or not), as the service user with its hardening:
-      #   ytsync-now @handle   (or a single video URL, to backfill it)
-      [ -n "$1" ] || { echo "usage: ytsync-now <@handle|channel url|UC-id|video url>" >&2; exit 2; }
-      systemctl set-environment YTSYNC_NOW="$1"
-      systemctl start ytsync; rc=$?
-      systemctl unset-environment YTSYNC_NOW
-      exit $rc
-    '');
-
-    systemd.services.ytsync = mkIf ytsyncEnabled {
-      description = "Download new videos of followed YouTube channels";
-      unitConfig.RequiresMountsFor = [ cfg.mediaRoot cfg.ytsync.stateDir ];
-      after = [ "network-online.target" ];
-      wants = [ "network-online.target" ];
-      path = [ pkgs.yt-dlp pkgs.ffmpeg pkgs.deno ];
-      environment = {
-        YTSYNC_MEDIA_ROOT = toString cfg.mediaRoot;
-        YTSYNC_STATE = toString cfg.ytsync.stateDir;
-        YTSYNC_CHANNELS = toString cfg.ytsync.channelsFile;
-        YTSYNC_YTDLP = "${pkgs.yt-dlp}/bin/yt-dlp";
-        YTSYNC_MEDIAD = cfg.bind;
-        YTSYNC_MAX_PER_CHANNEL = toString cfg.ytsync.maxPerChannel;
-        YTSYNC_PLAYER_CLIENTS = cfg.ytsync.playerClients;
-        YTSYNC_MAX_FILESIZE = cfg.ytsync.maxFilesize;
-        YTSYNC_MAX_AGE_DAYS = toString cfg.ytsync.maxAgeDays;
-        YTSYNC_MAX_HEIGHT = toString cfg.ytsync.maxHeight;
-        YTSYNC_MAX_CHANNELS = toString cfg.ytsync.maxChannels;
-        YTSYNC_LOG = cfg.logLevel;
-        # yt-dlp keeps its cache here.
-        XDG_CACHE_HOME = "${cfg.ytsync.stateDir}/cache";
-      } // vlogsEnv;
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${cfg.package}/bin/ytsync";
-        User = cfg.user;
-        Group = cfg.group;
-        ProtectSystem = "strict";
-        ProtectHome = true;
-        PrivateTmp = true;
-        NoNewPrivileges = true;
-        ReadWritePaths = [ cfg.ytsync.stateDir "${toString cfg.mediaRoot}/youtube" ];
-        TimeoutStartSec = "6h";
       };
     };
 
@@ -393,15 +292,6 @@ in
       serviceConfig = {
         Type = "oneshot";
         TimeoutStartSec = "1h";
-      };
-    };
-
-    systemd.timers.ytsync = mkIf ytsyncEnabled {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = cfg.ytsync.schedule;
-        Persistent = true;
-        RandomizedDelaySec = "15m";
       };
     };
   };

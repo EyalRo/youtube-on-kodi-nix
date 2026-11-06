@@ -1,12 +1,10 @@
 # Interactive VM for hands-on QA of the appliance, set up like the real box: the NAS library
-# mounted at /media (movies, tv, roms read-only; youtube read-write for ytsync), mediad, the
-# YouTube sync and the UI on the VM's display. Not a test; build and run it:
+# mounted at /media (movies, tv, roms, youtube, all read-only), mediad and the
+# UI on the VM's display. Not a test; build and run it:
 #   nix build .#nixosConfigurations.appliance-qa.config.system.build.vm
 #   ./result/bin/run-appliance-qa-vm
 # Click the QEMU window to give it the keyboard (arrows, Enter; ctrl+alt+g releases the grab).
 # Debug shell: ssh -p 2222 root@localhost (empty password).
-# Following creators: `ytsync follow @handle ["Name"]`, `ytsync unfollow @handle`, `ytsync list`
-# (it edits the channels file); `systemctl start ytsync` downloads now instead of at 04:00.
 { pkgs, appliance, ui, module, nfsShare }:
 
 {
@@ -44,13 +42,11 @@
     package = appliance;
     rescanSeconds = 30;
     victorialogs = "192.168.0.39:9428";
-    # A first live test: a couple of videos from one channel, not the whole list.
     artsync = { enable = true; tmdbKeyFile = "/persist/artsync/tmdb.key"; };
-    ytsync = { enable = true; seedChannels = ./channels.default.conf; maxChannels = 1; maxPerChannel = 1; maxHeight = 720; };
   };
 
   # The export is mounted once, read-write, and /media is assembled from it: the library folders
-  # are bind-mounted read-only so nothing but ytsync (youtube/) can change the NAS. automount (no idle unmount: mediad and artsync depend on the mount, and would be stopped with it) +
+  # are bind-mounted read-only so nothing can change the NAS. automount (no idle unmount: mediad and artsync depend on the mount, and would be stopped with it) +
   # nofail so a missing NAS delays nothing at boot.
   # (qemu-vm.nix replaces plain `fileSystems`; virtualisation.fileSystems is merged into it.)
   boot.supportedFilesystems = [ "nfs" ];
@@ -69,14 +65,13 @@
       "/media/movies" = bind "movies" true;
       "/media/tv" = bind "tv" true;
       "/media/roms" = bind "roms" true;
-      "/media/youtube" = bind "youtube" false;
+      "/media/youtube" = bind "youtube" true;
     };
-  # The youtube folder is the one place the box writes; world-writable because the NAS maps ids.
-  systemd.tmpfiles.rules = [ "d /mnt/nas/youtube 0777 - - -" "d /persist/artsync 0750 mediad mediad -" ];
+  systemd.tmpfiles.rules = [ "d /persist/artsync 0750 mediad mediad -" ];
   # Start mediad only once the library is mounted, not on an empty /media.
   systemd.services.mediad.unitConfig.RequiresMountsFor = [ "/media/movies" "/media/tv" "/media/roms" "/media/youtube" ];
 
-  # All the VM's logs (mediad, ytsync, ui, ...) to VictoriaLogs, so scan results can be checked there.
+  # All the VM's logs (mediad, ui, ...) to VictoriaLogs, so scan results can be checked there.
   services.journald.upload = {
     enable = true;
     settings.Upload.URL = "http://192.168.0.39:9428/insert/journald";

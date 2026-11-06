@@ -1,57 +1,39 @@
-# NixOS VM test for the appliance module: mediad + ytsync under their systemd
-# hardening, with a tmpfs standing in for the NFS share and a fake yt-dlp.
+# NixOS VM test for the appliance module: mediad under its systemd hardening, with a tmpfs
+# standing in for the NFS share and a fixture that drops one downloaded video into it.
 { pkgs, appliance, module }:
 
 let
-  # Writes what the real yt-dlp writes for one video, using the paths ytsync gives it
-  # (`-o <work dir>/<template>`, `--download-archive <file>`).
-  fakeYtDlp = pkgs.writeShellScriptBin "yt-dlp" ''
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        -o) out=$2; shift ;;
-        --download-archive) archive=$2; shift ;;
-        --skip-download) poster=1 ;;
-      esac
-      shift
-    done
-    if [ -n "$poster" ]; then
-      printf avatar > "''${out#pl_thumbnail:}.avatar_uncropped.jpg"
-      exit 0
-    fi
-    stem="$(dirname "$out")/2024-06-02 - Fake Upload [abc123XYZ]"
+  # Writes what yt-dlp leaves for one video (video, thumbnail, `.info.json`, channel poster) in
+  # the given folder, the way a downloader outside this appliance (MediaWatch) delivers it.
+  placeVideo = pkgs.writeShellScript "place-video" ''
+    dir="$1"
+    mkdir -p "$dir"
+    stem="$dir/2024-06-02 - Fake Upload [abc123XYZ]"
     cat > "$stem.info.json" <<JSON
     {"id":"abc123XYZ","title":"Fake Upload","channel":"Test Channel","upload_date":"20240602"}
     JSON
     printf 'jpg' > "$stem.jpg"
     printf 'mkv' > "$stem.mkv"
-    echo "youtube abc123XYZ" >> "$archive"
+    printf avatar > "$dir/poster.jpg"
   '';
 in
 pkgs.testers.runNixOSTest {
   name = "media-appliance";
-  node.pkgsReadOnly = false;  # lets the node overlay yt-dlp
 
   nodes.machine = { pkgs, ... }: {
     imports = [ module ];
-
-    nixpkgs.overlays = [ (_: _: { yt-dlp = fakeYtDlp; }) ];
 
     # Stand-in for the NFS share: a separate mount, as in production.
     systemd.mounts = [{
       what = "tmpfs"; where = "/media"; type = "tmpfs"; options = "mode=0755";
       wantedBy = [ "local-fs.target" ]; before = [ "local-fs.target" ];
     }];
-    # The share's youtube folder exists and belongs to the service user.
-    systemd.tmpfiles.rules = [ "d /media/youtube 0755 mediad mediad -" ];
+    systemd.tmpfiles.rules = [ "d /media/youtube 0755 root root -" ];
 
     services.media-appliance = {
       enable = true;
       package = appliance;
       rescanSeconds = 0;
-      ytsync = {
-        enable = true;
-        channelsFile = pkgs.writeText "channels.conf" "@testchannel | Test Channel\n";
-      };
     };
   };
 
@@ -65,23 +47,22 @@ pkgs.testers.runNixOSTest {
         assert "media.mount" in after, after
 
     with subtest("hardening is in effect"):
-        assert "strict" in machine.succeed("systemctl show ytsync.service -p ProtectSystem")
-        rw = machine.succeed("systemctl show ytsync.service -p ReadWritePaths")
-        assert "/media/youtube" in rw, rw
+        assert "strict" in machine.succeed("systemctl show mediad.service -p ProtectSystem")
         # mediad only reads the library.
         machine.fail("sudo -u mediad touch /media/x")
+        ro = machine.succeed("systemctl show mediad.service -p ReadOnlyPaths")
+        assert "/media" in ro, ro
 
     with subtest("library starts empty"):
         assert "Test Channel" not in machine.succeed("curl -sf http://127.0.0.1:8730/rows/everything")
 
-    with subtest("ytsync delivers through the hardened unit"):
-        machine.succeed("systemctl start ytsync.service")
+    with subtest("a downloaded video is placed and a rescan is requested"):
+        machine.succeed("${placeVideo} '/media/youtube/Test Channel'")
         machine.succeed("test -f '/media/youtube/Test Channel/2024-06-02 - Fake Upload [abc123XYZ].mkv'")
         machine.succeed("test -f '/media/youtube/Test Channel/2024-06-02 - Fake Upload [abc123XYZ].info.json'")
-        machine.succeed("grep -q abc123XYZ /persist/ytsync/archive.txt")
-        machine.succeed("test -f '/media/youtube/Test Channel/poster.jpg'")
+        machine.succeed("curl -sf -X POST http://127.0.0.1:8730/rescan")
 
-    with subtest("mediad serves the video after ytsync's rescan request"):
+    with subtest("mediad serves the video after the rescan request"):
         import json
         for row in ["channels", "everything"]:
             machine.wait_until_succeeds(f"curl -sf http://127.0.0.1:8730/rows/{row} | grep -q 'Test Channel'", timeout=30)

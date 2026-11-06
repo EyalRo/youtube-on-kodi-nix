@@ -1,11 +1,11 @@
-# The appliance's binaries (mediad, ytsync) from the Cargo workspace.
+# The appliance's binaries (mediad, artsync, ...) from the Cargo workspace.
 # `debug = true` compiles the debug logs in (RUSTFLAGS --cfg appliance_debug) and lifts the
 # default log filter to debug; without it they are not in the binaries at all.
 { lib, rustPlatform, mpv-unwrapped, debug ? false }:
 
 rustPlatform.buildRustPackage {
   pname = "media-appliance";
-version = "0.5.21";
+version = "0.6.0";
 
   src = lib.fileset.toSource {
     root = ./.;
