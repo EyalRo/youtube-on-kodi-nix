@@ -1111,15 +1111,17 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
-    // Look for new videos now instead of at the next timer run. `--no-block` queues the oneshot and
-    // returns; a run already in progress absorbs the request.
-    ui.on_sync(|| {
-        let cmd = env_or("UI_SYNC_CMD", "systemctl");
-        let unit = env_or("UI_SYNC_UNIT", "ytsync.service");
-        match Command::new(&cmd).args(["start", "--no-block", &unit]).status() {
-            Ok(s) if s.success() => tracing::info!(%unit, "sync requested from the top bar"),
-            Ok(s) => tracing::error!(%unit, status = %s, "sync request refused; is the polkit rule for the UI user in place?"),
-            Err(e) => tracing::error!(%unit, error = %e, "cannot run {cmd} to request a sync"),
+    // "Check for new videos": downloading lives in MediaWatch now, so this asks mediad to rescan the
+    // library right away instead of at its next timer run. The POST runs on its own thread so a slow
+    // or absent mediad never freezes the UI.
+    ui.on_sync({
+        let mediad = mediad.clone();
+        move || {
+            let mediad = mediad.clone();
+            std::thread::spawn(move || match post_json(&mediad, "/rescan", &serde_json::json!({})) {
+                Ok(()) => tracing::info!("sync requested from the top bar (library rescan)"),
+                Err(e) => tracing::error!(error = %e, "sync request failed: mediad did not accept the rescan"),
+            });
         }
     });
     #[cfg(appliance_debug)]

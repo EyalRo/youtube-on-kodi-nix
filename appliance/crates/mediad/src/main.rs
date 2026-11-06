@@ -53,11 +53,6 @@ async fn main() {
     tracing::info!(media_root = %media_root.display(), db = %db_path.display(), %bind, rescan_secs, debug_build = applog::DEBUG_BUILD, "mediad starting");
 
     let mut state = AppState::new(store, media_root, release_db);
-    if let Ok(file) = std::env::var("MEDIAD_YTSYNC_CHANNELS")
-        && !file.is_empty()
-    {
-        state = state.with_channels_file(PathBuf::from(file));
-    }
     if let Ok(dir) = std::env::var("MEDIAD_ART_CACHE")
         && !dir.is_empty()
     {

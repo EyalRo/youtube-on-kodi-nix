@@ -8,7 +8,6 @@ rust-version.workspace = true
 
 [dependencies]
 catalog = { path = "../catalog" }
-ytsync = { path = "../ytsync" }
 scanner = { path = "../scanner" }
 store = { path = "../store" }
 axum.workspace = true
