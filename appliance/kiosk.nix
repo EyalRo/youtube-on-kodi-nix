@@ -12,6 +12,14 @@ let
     lib.optional backend.updateCheck.enable "appliance-update-check.service"
     ++ lib.optional (backend.updateCheck.enable && backend.updateCheck.install.flake != null) "appliance-upgrade.service";
 
+  # logind actions behind `systemctl reboot` and `systemctl poweroff`.
+  powerActions = [
+    "org.freedesktop.login1.reboot"
+    "org.freedesktop.login1.reboot-multiple-sessions"
+    "org.freedesktop.login1.power-off"
+    "org.freedesktop.login1.power-off-multiple-sessions"
+  ];
+
   # The Plymouth theme: the logo centred on the UI's background colour.
   shmetflixTheme = pkgs.runCommand "plymouth-theme-shmetflix" { } ''
     d=$out/share/plymouth/themes/shmetflix
@@ -261,16 +269,22 @@ in
       };
     };
 
-    # The settings page starts the version check and the upgrade, as the UI user, which polkit
-    # refuses unless told otherwise. Only the start verb, only on those units.
-    security.polkit = mkIf (polkitUnits != [ ]) {
+    # The UI runs as an unprivileged user, so polkit refuses what it asks for unless told otherwise:
+    # the settings page starts the version check and the upgrade (only the start verb, only on those
+    # units), and the top bar's reboot and shutdown go through logind. The login1 actions are
+    # allowed explicitly because the default policy asks for a password as soon as any other
+    # session (an SSH login, say) is open, which a TV has no way to answer.
+    security.polkit = {
       enable = true;
       extraConfig = ''
         polkit.addRule(function(action, subject) {
+          if (subject.user != "${cfg.user}") return polkit.Result.NOT_HANDLED;
           if (action.id == "org.freedesktop.systemd1.manage-units"
               && ${builtins.toJSON polkitUnits}.indexOf(action.lookup("unit")) >= 0
-              && action.lookup("verb") == "start"
-              && subject.user == "${cfg.user}") {
+              && action.lookup("verb") == "start") {
+            return polkit.Result.YES;
+          }
+          if (${builtins.toJSON powerActions}.indexOf(action.id) >= 0) {
             return polkit.Result.YES;
           }
         });
